@@ -45,13 +45,47 @@ app.post('/webhook', (req, res) => {
 
 // Handle Incoming Commands
 async function handleMessage(sender_psid, received_message) {
-  if (!received_message.text) return;
+  const messageText = received_message.text ? received_message.text.trim() : "";
+  const attachments = received_message.attachments;
 
-  const text = received_message.text.trim();
+  // ✂️ COMMAND 1: /removebg (KAPAG MAY SAMA O REPLY NA PICTURE)
+  if (messageText.startsWith('/removebg') || messageText.startsWith('/nobg')) {
+    let targetImageUrl = null;
 
-  // 📸 COMMAND 1: /image
-  if (text.startsWith('/image')) {
-    const prompt = text.replace('/image', '').trim();
+    // Check if the user attached an image with the command
+    if (attachments && attachments[0] && attachments[0].type === 'image') {
+      targetImageUrl = attachments[0].payload.url;
+    } 
+    // Check if user replied to an image message
+    else if (received_message.reply_to && received_message.reply_to.attachments && received_message.reply_to.attachments[0].type === 'image') {
+      targetImageUrl = received_message.reply_to.attachments[0].payload.url;
+    }
+
+    if (!targetImageUrl) {
+      return callSendAPI(sender_psid, { 
+        text: "Please send or reply to an image with the command /removebg !" 
+      });
+    }
+
+    await callSendAPI(sender_psid, { text: "✂️ Removing background, please wait..." });
+
+    // Free background removal service via Pollinations API
+    const processedBgUrl = `https://image.pollinations.ai/prompt/remove%20background%20isolated%20on%20transparent?image=${encodeURIComponent(targetImageUrl)}`;
+
+    return callSendAPI(sender_psid, {
+      attachment: {
+        type: "image",
+        payload: {
+          url: processedBgUrl,
+          is_reusable: true
+        }
+      }
+    });
+  }
+
+  // 📸 COMMAND 2: /image <prompt>
+  if (messageText.startsWith('/image')) {
+    const prompt = messageText.replace('/image', '').trim();
 
     if (!prompt) {
       return callSendAPI(sender_psid, { text: "Please provide a prompt! Example: /image cute cat" });
@@ -61,7 +95,7 @@ async function handleMessage(sender_psid, received_message) {
 
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
 
-    callSendAPI(sender_psid, {
+    return callSendAPI(sender_psid, {
       attachment: {
         type: "image",
         payload: {
@@ -72,38 +106,47 @@ async function handleMessage(sender_psid, received_message) {
     });
   } 
 
-  // 🎵 COMMAND 2: /play or /music
-  else if (text.startsWith('/play') || text.startsWith('/music')) {
-    const songQuery = text.replace(/\/play|\/music/, '').trim();
+  // 🎵 COMMAND 3: /play or /music <title>
+  if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
+    const songQuery = messageText.replace(/\/play|\/music/, '').trim();
 
     if (!songQuery) {
       return callSendAPI(sender_psid, { text: "Please provide a song title! Example: /play paradise by chase atlantic" });
     }
 
-    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(songQuery)}`;
+    await callSendAPI(sender_psid, { text: `🎵 Searching audio for "${songQuery}"...` });
 
-    callSendAPI(sender_psid, {
-      attachment: {
-        type: "template",
-        payload: {
-          template_type: "button",
-          text: `🎶 Here is what I found for "${songQuery}". Click below to listen:`,
-          buttons: [
-            {
-              type: "web_url",
-              url: youtubeSearchUrl,
-              title: "▶️ Play Song"
+    try {
+      const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
+
+      if (deezerRes.data && deezerRes.data.data.length > 0) {
+        const track = deezerRes.data.data[0];
+        const audioUrl = track.preview;
+
+        await callSendAPI(sender_psid, { text: `🎶 Playing preview: ${track.title} - ${track.artist.name}` });
+
+        return callSendAPI(sender_psid, {
+          attachment: {
+            type: "audio",
+            payload: {
+              url: audioUrl,
+              is_reusable: true
             }
-          ]
-        }
+          }
+        });
+      } else {
+        return callSendAPI(sender_psid, { text: `❌ Song "${songQuery}" not found. Try another title!` });
       }
-    });
+    } catch (err) {
+      console.error("Audio error:", err.message);
+      return callSendAPI(sender_psid, { text: "❌ Failed to fetch audio record. Please try again." });
+    }
   } 
 
   // ❓ DEFAULT RESPONSE
-  else {
+  if (messageText) {
     callSendAPI(sender_psid, { 
-      text: `Received: "${text}".\n\nAvailable commands:\n📸 /image <prompt>\n🎵 /play <song title>` 
+      text: `Received: "${messageText}".\n\nAvailable commands:\n📸 /image <prompt>\n🎵 /play <song title>\n✂️ /removebg (send or reply to a photo)` 
     });
   }
 }
