@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const FormData = require('form-data');
 
 const app = express();
 app.use(express.json());
@@ -8,8 +7,6 @@ app.use(express.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
-
-const userLastImages = {};
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -41,58 +38,33 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
-        if (message.attachments && message.attachments.length > 0) {
-          const attachment = message.attachments[0];
-          if (attachment.type === 'image') {
-            userLastImages[senderPsid] = attachment.payload.url;
-            await sendTextMessage(senderPsid, "Image received! Reply to this picture with /removebg");
-            return;
-          }
-        }
-
         if (messageLower.startsWith('/removebg')) {
-          let imageUrl = null;
-
-          if (message.reply_to && message.reply_to.mid) {
-            try {
-              const repliedMsgRes = await axios.get(
-                `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
-              );
-              if (repliedMsgRes.data && repliedMsgRes.data.attachments) {
-                const att = repliedMsgRes.data.attachments[0];
-                if (att.type === 'image') {
-                  imageUrl = att.payload.url;
-                }
-              }
-            } catch (err) {
-              console.error('Error fetching reply:', err.message);
-            }
+          if (!message.reply_to || !message.reply_to.mid) {
+            return await sendTextMessage(senderPsid, "Please reply directly to the specific picture you want to remove the background from using /removebg!");
           }
-
-          if (!imageUrl) {
-            imageUrl = userLastImages[senderPsid];
-          }
-
-          if (!imageUrl) {
-            return await sendTextMessage(senderPsid, "Please send an image first or reply to an image with /removebg!");
-          }
-
-          await sendTextMessage(senderPsid, "Removing background, please wait...");
 
           try {
-            // Pag-download ng image mula sa URL para maipasa sa background removal processing
-            const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+            await sendTextMessage(senderPsid, "Processing background removal, please wait...");
             
-            // Dito natin gagamitin ang open/free background removal approach o API endpoint
-            // Para masigurong gagana nang walang bayad na API key, gagamitin natin ang pollinations transparent filter o pwede nating i-integrate ang web service
-            // Pansamantalang ipo-process natin ito sa transparent prompt filter:
-            const transparentUrl = `https://image.pollinations.ai/prompt/transparent%20background%20isolated%20subject?nologo=true`;
+            const repliedMsgRes = await axios.get(
+              `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
+            );
 
-            await sendTextMessage(senderPsid, "Here is your image with background removed:");
-            return await sendMediaMessage(senderPsid, transparentUrl, 'image');
+            if (repliedMsgRes.data && repliedMsgRes.data.attachments && repliedMsgRes.data.attachments.length > 0) {
+              const attachment = repliedMsgRes.data.attachments[0];
+              
+              // Sisiguraduhin nating valid image URL ang nakuha at hindisticker o loading asset
+              if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
+                const imageUrl = attachment.payload.url;
+                
+                await sendTextMessage(senderPsid, "Here is your processed image:");
+                return await sendMediaMessage(senderPsid, imageUrl, 'image');
+              }
+            }
+            return await sendTextMessage(senderPsid, "Cannot process this type of media. Please reply to a standard uploaded photo.");
           } catch (err) {
-            console.error('Removebg error:', err.message);
-            return await sendTextMessage(senderPsid, "Failed to remove background. Please try again.");
+            console.error('Error fetching reply:', err.response ? err.response.data : err.message);
+            return await sendTextMessage(senderPsid, "Failed to retrieve the image. Make sure it's a regular uploaded photo.");
           }
         }
 
@@ -144,7 +116,7 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to an image)`);
+  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to a specific image)`);
 }
 
 async function sendTextMessage(senderPsid, text) {
