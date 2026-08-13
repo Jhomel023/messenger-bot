@@ -124,24 +124,26 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  // --- GEMINI AI CHAT (VIA DIRECT AXIOS API) ---
+  // --- GEMINI AI CHAT (FORCED ENGLISH RESPONSE) ---
   try {
     const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [
           {
-            parts: [{ text: text }]
+            parts: [
+              { text: `Please answer the following question in English only: ${text}` }
+            ]
           }
         ]
       }
     );
 
-    const aiReply = geminiRes.data.candidates[0].content.parts[0].text || "Walang maisip na sagot si Gemini.";
+    const aiReply = geminiRes.data.candidates[0].content.parts[0].text || "I couldn't generate a response.";
     return await sendTextMessage(senderPsid, aiReply);
   } catch (err) {
     console.error('Gemini Error:', err.response ? err.response.data : err.message);
-    return await sendTextMessage(senderPsid, "May nangyaring error sa AI. Subukan ulit mamaya.");
+    return await sendTextMessage(senderPsid, "An error occurred with the AI. Please try again later.");
   }
 }
 
