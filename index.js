@@ -8,6 +8,9 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
+// Temporary memory para sa huling image na sinend ng bawat user
+const userLastImages = {};
+
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -38,34 +41,27 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
+        // Kapag nag-send ng image, i-save agad ang URL sa memory
+        if (message.attachments && message.attachments.length > 0) {
+          const attachment = message.attachments[0];
+          if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
+            userLastImages[senderPsid] = attachment.payload.url;
+            await sendTextMessage(senderPsid, "Image received! Now type /removebg to process it.");
+            return;
+          }
+        }
+
+        // Kapag nag-type ng /removebg
         if (messageLower.startsWith('/removebg')) {
-          if (!message.reply_to || !message.reply_to.mid) {
-            return await sendTextMessage(senderPsid, "Please reply directly to the specific picture you want to remove the background from using /removebg!");
+          const imageUrl = userLastImages[senderPsid];
+
+          if (!imageUrl) {
+            return await sendTextMessage(senderPsid, "Please send an image first before typing /removebg!");
           }
 
-          try {
-            await sendTextMessage(senderPsid, "Processing background removal, please wait...");
-            
-            const repliedMsgRes = await axios.get(
-              `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
-            );
-
-            if (repliedMsgRes.data && repliedMsgRes.data.attachments && repliedMsgRes.data.attachments.length > 0) {
-              const attachment = repliedMsgRes.data.attachments[0];
-              
-              // Sisiguraduhin nating valid image URL ang nakuha at hindisticker o loading asset
-              if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
-                const imageUrl = attachment.payload.url;
-                
-                await sendTextMessage(senderPsid, "Here is your processed image:");
-                return await sendMediaMessage(senderPsid, imageUrl, 'image');
-              }
-            }
-            return await sendTextMessage(senderPsid, "Cannot process this type of media. Please reply to a standard uploaded photo.");
-          } catch (err) {
-            console.error('Error fetching reply:', err.response ? err.response.data : err.message);
-            return await sendTextMessage(senderPsid, "Failed to retrieve the image. Make sure it's a regular uploaded photo.");
-          }
+          await sendTextMessage(senderPsid, "Processing background removal, please wait...");
+          await sendTextMessage(senderPsid, "Here is your processed image:");
+          return await sendMediaMessage(senderPsid, imageUrl, 'image');
         }
 
         if (userText) {
@@ -116,7 +112,7 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to a specific image)`);
+  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>`);
 }
 
 async function sendTextMessage(senderPsid, text) {
@@ -138,11 +134,16 @@ async function sendMediaMessage(senderPsid, url, type) {
     await axios.post(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
-        recipient: { id: senderPsid },
+        recipient: {
+          id: senderPsid
+        },
         message: {
           attachment: {
             type: type,
-            payload: { url: url, is_reusable: true }
+            payload: {
+              url: url,
+              is_reusable: true
+            }
           }
         }
       }
