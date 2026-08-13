@@ -8,7 +8,9 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
-// 1. WEBHOOK VERIFICATION
+// I-store muna natin ang huling image URL na sinend ng bawat user (pansamantalang memory)
+const userLastImages = {};
+
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -25,7 +27,6 @@ app.get('/webhook', (req, res) => {
   res.send('Messenger Bot Server is Running!');
 });
 
-// 2. RECEIVE MESSAGES FROM FACEBOOK
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
@@ -35,22 +36,25 @@ app.post('/webhook', async (req, res) => {
       const webhookEvent = entry.messaging[0];
       const senderPsid = webhookEvent.sender.id;
 
-      // Suriin kung may text o may kasamang attachment (picture)
       if (webhookEvent.message) {
         const message = webhookEvent.message;
         const userText = message.text ? message.text.trim() : '';
         
-        // Check kung may ipinadalang imahe ang user
-        let attachmentUrl = null;
+        // Kapag nag-send ng picture ang user, i-save natin agad sa memory
         if (message.attachments && message.attachments.length > 0) {
           const attachment = message.attachments[0];
           if (attachment.type === 'image') {
-            attachmentUrl = attachment.payload.url;
+            userLastImages[senderPsid] = attachment.payload.url;
+            console.log(`📷 Image saved for user ${senderPsid}`);
+            await sendTextMessage(senderPsid, "📸 Nakuha ko ang picture! I-type na ang /removebg para tanggalin ang background.");
+            return;
           }
         }
 
-        console.log(`📩 Message from ${senderPsid}: text="${userText}", hasImage=${!!attachmentUrl}`);
-        await handleMessage(senderPsid, userText, attachmentUrl);
+        if (userText) {
+          console.log(`📩 Message from ${senderPsid}: "${userText}"`);
+          await handleMessage(senderPsid, userText);
+        }
       }
     });
 
@@ -60,11 +64,9 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// 3. COMMAND HANDLER
-async function handleMessage(senderPsid, text, imageUrl) {
+async function handleMessage(senderPsid, text) {
   const messageText = text.toLowerCase();
 
-  // 📸 COMMAND 1: /image <prompt>
   if (messageText.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
     if (!prompt) {
@@ -76,7 +78,6 @@ async function handleMessage(senderPsid, text, imageUrl) {
     return await sendMediaMessage(senderPsid, genImageUrl, 'image');
   }
 
-  // 🎵 COMMAND 2: /play <song>
   if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
     if (!songQuery) {
@@ -98,33 +99,28 @@ async function handleMessage(senderPsid, text, imageUrl) {
     }
   }
 
-  // ✂️ COMMAND 3: /removebg (Automatic na kukuha ng sinend na picture)
+  // ✂️ COMMAND: /removebg (Kukunin yung huling sinend na picture)
   if (messageText.startsWith('/removebg')) {
+    const imageUrl = userLastImages[senderPsid];
     if (!imageUrl) {
-      return await sendTextMessage(senderPsid, "⚠️ Mag-send muna ng picture kasabay ng pag-type ng /removebg o i-caption ito!");
+      return await sendTextMessage(senderPsid, "⚠️ Mag-send ka muna ng picture bago i-type ang /removebg!");
     }
 
-    await sendTextMessage(senderPsid, "✂️ Tinatanggal ang background, sandali lang...");
+    await sendTextMessage(senderPsid, "✂️ Pinoproseso ang larawan...");
     
-    // Dito maaari nating i-pass ang image URL sa isang background removal API o serbisyo
-    // Pansamantalang ibabalik muna natin ang na-detect na URL o gagamitin ang API
     try {
-      // Halimbawa ng pagpasa ng image URL sa processing API
-      const processedImageUrl = `https://image.pollinations.ai/prompt/transparent%20background%20isolated?nologo=true`; // Placeholder o ilagay ang actual removebg API mo
-      await sendTextMessage(senderPsid, "✅ Narito ang larawan na walang background:");
-      return await sendMediaMessage(senderPsid, imageUrl, 'image'); // Pansamantalang ibabalik ang image pabalik
+      // Dito mo ikakabit ang background removal API kung meron ka, 
+      // Pansamantalang ibabalik muna natin ang picture para ma-test mo.
+      await sendTextMessage(senderPsid, "✅ Narito ang resulta:");
+      return await sendMediaMessage(senderPsid, imageUrl, 'image');
     } catch (err) {
-      return await sendTextMessage(senderPsid, "❌ Nabigo sa pag-process ng removebg.");
+      return await sendTextMessage(senderPsid, "❌ May error sa pag-process ng removebg.");
     }
   }
 
-  // DEFAULT HELP
-  if (text) {
-    return await sendTextMessage(senderPsid, `🤖 Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Mag-send ng pic kasama ang command)`);
-  }
+  return await sendTextMessage(senderPsid, `🤖 Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg`);
 }
 
-// 4. SEND TEXT MESSAGE API
 async function sendTextMessage(senderPsid, text) {
   try {
     await axios.post(
@@ -139,7 +135,6 @@ async function sendTextMessage(senderPsid, text) {
   }
 }
 
-// 5. SEND MEDIA API
 async function sendMediaMessage(senderPsid, url, type) {
   try {
     await axios.post(
