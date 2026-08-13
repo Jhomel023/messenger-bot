@@ -43,12 +43,13 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// Handle Incoming Messages
+// Handle Incoming Commands
 async function handleMessage(sender_psid, received_message) {
   if (!received_message.text) return;
 
   const text = received_message.text.trim();
 
+  // 📸 COMMAND 1: /image (GENERATING PICTURES)
   if (text.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
 
@@ -56,13 +57,11 @@ async function handleMessage(sender_psid, received_message) {
       return callSendAPI(sender_psid, { text: "Maglagay ka ng prompt! Halimbawa: /image cute cat" });
     }
 
-    // Sabihan muna ang user na nagse-generate pa
     await callSendAPI(sender_psid, { text: "🎨 Generating image, wait lang ng kaunti..." });
 
-    // Pollinations AI URL (Fixed & Fast format for Meta Messenger)
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
 
-    const responsePayload = {
+    callSendAPI(sender_psid, {
       attachment: {
         type: "image",
         payload: {
@@ -70,12 +69,44 @@ async function handleMessage(sender_psid, received_message) {
           is_reusable: true
         }
       }
-    };
+    });
+  } 
 
-    callSendAPI(sender_psid, responsePayload);
-  } else {
-    // Normal reply kapag hindi /image command
-    callSendAPI(sender_psid, { text: `Nareceive ko: "${text}". Gamitin ang /image <prompt> para mag-generate ng pic!` });
+  // 🎵 COMMAND 2: /play or /music (SEARCH & PLAY SONG)
+  else if (text.startsWith('/play') || text.startsWith('/music')) {
+    const songQuery = text.replace(/\/play|\/music/, '').trim();
+
+    if (!songQuery) {
+      return callSendAPI(sender_psid, { text: "Maglagay ka ng pamagat ng kanta! Halimbawa: /play paradise by chase atlantic" });
+    }
+
+    await callSendAPI(sender_psid, { text: `🎵 Naghahanap ng kanta: "${songQuery}"...` });
+
+    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(songQuery)}`;
+
+    callSendAPI(sender_psid, {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: `🎶 Eto na ang nahanap kong kanta para sa "${songQuery}":`,
+          buttons: [
+            {
+              type: "web_url",
+              url: youtubeSearchUrl,
+              title: "▶️ Play Song"
+            }
+          ]
+        }
+      }
+    });
+  } 
+
+  // ❓ DEFAULT RESPONSE (If invalid command)
+  else {
+    callSendAPI(sender_psid, { 
+      text: `Nareceive ko: "${text}".\n\nMga pwedeng ibulong sakin:\n📸 /image <prompt>\n🎵 /play <song title>` 
+    });
   }
 }
 
