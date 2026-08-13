@@ -109,7 +109,7 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>`);
+  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to an image)`);
 }
 
 async function sendTextMessage(senderPsid, text) {
