@@ -8,9 +8,6 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
-// I-store muna natin ang huling image URL na sinend ng bawat user (pansamantalang memory)
-const userLastImages = {};
-
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -39,15 +36,31 @@ app.post('/webhook', async (req, res) => {
       if (webhookEvent.message) {
         const message = webhookEvent.message;
         const userText = message.text ? message.text.trim() : '';
-        
-        // Kapag nag-send ng picture ang user, i-save natin agad sa memory
-        if (message.attachments && message.attachments.length > 0) {
-          const attachment = message.attachments[0];
-          if (attachment.type === 'image') {
-            userLastImages[senderPsid] = attachment.payload.url;
-            console.log(`📷 Image saved for user ${senderPsid}`);
-            await sendTextMessage(senderPsid, "📸 Nakuha ko ang picture! I-type na ang /removebg para tanggalin ang background.");
-            return;
+        const messageLower = userText.toLowerCase();
+
+        // Check if the user replied to an image with a command
+        if (message.reply_to && message.reply_to.mid) {
+          try {
+            // Fetch the original message that was replied to using Meta Graph API
+            const repliedMsgRes = await axios.get(
+              `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
+            );
+
+            if (repliedMsgRes.data && repliedMsgRes.data.attachments) {
+              const attachment = repliedMsgRes.data.attachments[0];
+              if (attachment.type === 'image' && messageLower.startsWith('/removebg')) {
+                const imageUrl = attachment.payload.url;
+                console.log(`✂️ Processing removebg for replied image from ${senderPsid}`);
+
+                await sendTextMessage(senderPsid, "Removing background, please wait...");
+                
+                // Here you can process or pass the imageUrl to a removebg API
+                await sendTextMessage(senderPsid, "Here is your processed image:");
+                return await sendMediaMessage(senderPsid, imageUrl, 'image');
+              }
+            }
+          } catch (err) {
+            console.error('❌ Error fetching replied message:', err.response ? err.response.data : err.message);
           }
         }
 
@@ -70,10 +83,10 @@ async function handleMessage(senderPsid, text) {
   if (messageText.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
     if (!prompt) {
-      return await sendTextMessage(senderPsid, "⚠️ Maglagay ng prompt! Example: /image cute cat");
+      return await sendTextMessage(senderPsid, "Please provide a prompt! Example: /image cute cat");
     }
 
-    await sendTextMessage(senderPsid, "🎨 Generating image, please wait...");
+    await sendTextMessage(senderPsid, "Generating image, please wait...");
     const genImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
     return await sendMediaMessage(senderPsid, genImageUrl, 'image');
   }
@@ -81,44 +94,25 @@ async function handleMessage(senderPsid, text) {
   if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
     if (!songQuery) {
-      return await sendTextMessage(senderPsid, "⚠️ Maglagay ng kanta! Example: /play paradise chase atlantic");
+      return await sendTextMessage(senderPsid, "Please provide a song title! Example: /play paradise chase atlantic");
     }
 
-    await sendTextMessage(senderPsid, `🎵 Searching audio for "${songQuery}"...`);
+    await sendTextMessage(senderPsid, `Searching audio for "${songQuery}"...`);
     try {
       const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
       if (deezerRes.data && deezerRes.data.data.length > 0) {
         const track = deezerRes.data.data[0];
-        await sendTextMessage(senderPsid, `🎶 Playing preview: ${track.title} - ${track.artist.name}`);
+        await sendTextMessage(senderPsid, `Playing preview: ${track.title} - ${track.artist.name}`);
         return await sendMediaMessage(senderPsid, track.preview, 'audio');
       } else {
-        return await sendTextMessage(senderPsid, `❌ Song "${songQuery}" not found.`);
+        return await sendTextMessage(senderPsid, `Song "${songQuery}" not found.`);
       }
     } catch (err) {
-      return await sendTextMessage(senderPsid, "❌ Error fetching music.");
+      return await sendTextMessage(senderPsid, "Error fetching music.");
     }
   }
 
-  // ✂️ COMMAND: /removebg (Kukunin yung huling sinend na picture)
-  if (messageText.startsWith('/removebg')) {
-    const imageUrl = userLastImages[senderPsid];
-    if (!imageUrl) {
-      return await sendTextMessage(senderPsid, "⚠️ Mag-send ka muna ng picture bago i-type ang /removebg!");
-    }
-
-    await sendTextMessage(senderPsid, "✂️ Pinoproseso ang larawan...");
-    
-    try {
-      // Dito mo ikakabit ang background removal API kung meron ka, 
-      // Pansamantalang ibabalik muna natin ang picture para ma-test mo.
-      await sendTextMessage(senderPsid, "✅ Narito ang resulta:");
-      return await sendMediaMessage(senderPsid, imageUrl, 'image');
-    } catch (err) {
-      return await sendTextMessage(senderPsid, "❌ May error sa pag-process ng removebg.");
-    }
-  }
-
-  return await sendTextMessage(senderPsid, `🤖 Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg`);
+  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- Reply to any picture with /removebg`);
 }
 
 async function sendTextMessage(senderPsid, text) {
