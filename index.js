@@ -49,7 +49,7 @@ async function handleMessage(sender_psid, received_message) {
 
   const text = received_message.text.trim();
 
-  // 📸 COMMAND 1: /image (GENERATING PICTURES)
+  // 📸 COMMAND 1: /image
   if (text.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
 
@@ -72,7 +72,7 @@ async function handleMessage(sender_psid, received_message) {
     });
   } 
 
-  // 🎵 COMMAND 2: /play or /music (SEARCH & PLAY SONG)
+  // 🎵 COMMAND 2: /play or /music (SENDS DIRECT AUDIO ATTACHMENT)
   else if (text.startsWith('/play') || text.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
 
@@ -80,29 +80,34 @@ async function handleMessage(sender_psid, received_message) {
       return callSendAPI(sender_psid, { text: "Maglagay ka ng pamagat ng kanta! Halimbawa: /play paradise by chase atlantic" });
     }
 
-    await callSendAPI(sender_psid, { text: `🎵 Naghahanap ng kanta: "${songQuery}"...` });
+    await callSendAPI(sender_psid, { text: `🎵 Hinahanap ang audio ng "${songQuery}", wait lang...` });
 
-    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(songQuery)}`;
+    try {
+      // Direct MP3 Search via free audio API
+      const searchUrl = `https://api.popcat.xyz/song?q=${encodeURIComponent(songQuery)}`;
+      const response = await axios.get(searchUrl);
 
-    callSendAPI(sender_psid, {
-      attachment: {
-        type: "template",
-        payload: {
-          template_type: "button",
-          text: `🎶 Eto na ang nahanap kong kanta para sa "${songQuery}":`,
-          buttons: [
-            {
-              type: "web_url",
-              url: youtubeSearchUrl,
-              title: "▶️ Play Song"
+      if (response.data && response.data.download) {
+        // Send direct audio attachment (mag-mumukhang audio player / record sa Messenger)
+        callSendAPI(sender_psid, {
+          attachment: {
+            type: "audio",
+            payload: {
+              url: response.data.download,
+              is_reusable: true
             }
-          ]
-        }
+          }
+        });
+      } else {
+        callSendAPI(sender_psid, { text: `❌ Pasensya na, hindi nahanap ang audio file para sa "${songQuery}". Subukan ang ibang pamagat o artist.` });
       }
-    });
+    } catch (error) {
+      console.error("Music API Error:", error.message);
+      callSendAPI(sender_psid, { text: "❌ Nagka-error sa pag-download ng audio. Subukan ulit maya-maya." });
+    }
   } 
 
-  // ❓ DEFAULT RESPONSE (If invalid command)
+  // ❓ DEFAULT RESPONSE
   else {
     callSendAPI(sender_psid, { 
       text: `Nareceive ko: "${text}".\n\nMga pwedeng ibulong sakin:\n📸 /image <prompt>\n🎵 /play <song title>` 
