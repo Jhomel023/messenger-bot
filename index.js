@@ -1,99 +1,134 @@
-const login = require('fca-project-origo');
-const fs = require('fs');
+const express = require('express');
 const axios = require('axios');
 
-let appState;
-try {
-  appState = JSON.parse(fs.readFileSync('appstate.json', 'utf8'));
-} catch (err) {
-  console.error("Error reading appstate.json file:", err.message);
+const app = express();
+app.use(express.json());
+
+// Kukunin ang Environment Variables mula sa Render Dashboard
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const PORT = process.env.PORT || 3000;
+
+// 1. WEBHOOK VERIFICATION (Para sa Facebook setup)
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('✅ Webhook Verified successfully!');
+      return res.status(200).send(challenge);
+    } else {
+      return res.sendStatus(403);
+    }
+  }
+  res.send('Messenger Bot Server is Running!');
+});
+
+// 2. RECEIVE MESSAGES FROM FACEBOOK
+app.post('/webhook', async (req, res) => {
+  const body = req.body;
+
+  if (body.object === 'page') {
+    body.entry.forEach(async (entry) => {
+      if (!entry.messaging) return;
+      const webhookEvent = entry.messaging[0];
+      const senderPsid = webhookEvent.sender.id;
+
+      if (webhookEvent.message && webhookEvent.message.text) {
+        const userMessage = webhookEvent.message.text;
+        console.log(`📩 Message from ${senderPsid}: "${userMessage}"`);
+        await handleMessage(senderPsid, userMessage);
+      }
+    });
+
+    res.status(200).send('EVENT_RECEIVED');
+  } else {
+    res.sendStatus(404);
+  }
+});
+
+// 3. COMMAND HANDLER
+async function handleMessage(senderPsid, text) {
+  const messageText = text.trim();
+
+  // 📸 COMMAND 1: /image <prompt>
+  if (messageText.startsWith('/image')) {
+    const prompt = messageText.replace('/image', '').trim();
+    if (!prompt) {
+      return await sendTextMessage(senderPsid, "⚠️ Maglagay ng prompt! Example: /image cute cat");
+    }
+
+    await sendTextMessage(senderPsid, "🎨 Generating image, please wait...");
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
+    return await sendMediaMessage(senderPsid, imageUrl, 'image');
+  }
+
+  // 🎵 COMMAND 2: /play <song>
+  if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
+    const songQuery = messageText.replace(/\/play|\/music/, '').trim();
+    if (!songQuery) {
+      return await sendTextMessage(senderPsid, "⚠️ Maglagay ng kanta! Example: /play paradise chase atlantic");
+    }
+
+    await sendTextMessage(senderPsid, `🎵 Searching audio for "${songQuery}"...`);
+    try {
+      const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
+      if (deezerRes.data && deezerRes.data.data.length > 0) {
+        const track = deezerRes.data.data[0];
+        await sendTextMessage(senderPsid, `🎶 Playing preview: ${track.title} - ${track.artist.name}`);
+        return await sendMediaMessage(senderPsid, track.preview, 'audio');
+      } else {
+        return await sendTextMessage(senderPsid, `❌ Song "${songQuery}" not found.`);
+      }
+    } catch (err) {
+      return await sendTextMessage(senderPsid, "❌ Error fetching music.");
+    }
+  }
+
+  // ✂️ COMMAND 3: /removebg
+  if (messageText.startsWith('/removebg')) {
+    return await sendTextMessage(senderPsid, "💡 Mag-reply sa isang picture gamit ang prompt o mag-send ng image URL!");
+  }
+
+  // DEFAULT HELP
+  return await sendTextMessage(senderPsid, `🤖 Bot Commands:\n- /image <prompt>\n- /play <title>`);
 }
 
-if (appState) {
-  login({ appState }, { listenEvents: true, selfListen: false }, (err, api) => {
-    if (err) return console.error("Facebook Login Error:", err);
+// 4. SEND TEXT MESSAGE API
+async function sendTextMessage(senderPsid, text) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        recipient: { id: senderPsid },
+        message: { text: text }
+      }
+    );
+  } catch (err) {
+    console.error('❌ Error sending text:', err.response ? err.response.data : err.message);
+  }
+}
 
-    console.log("🚀 Bot successfully logged in on your PC and listening for messages!");
-
-    api.setOptions({ listenEvents: true, selfListen: false });
-
-    api.listenMqtt(async (err, event) => {
-      if (err) return console.error("Listen Error:", err);
-
-      if (event.type === "message" || event.type === "message_reply") {
-        const messageText = event.body ? event.body.trim() : "";
-        const threadID = event.threadID;
-
-        // ✂️ COMMAND 1: /removebg
-        if (messageText.startsWith('/removebg') || messageText.startsWith('/nobg')) {
-          let targetImageUrl = null;
-
-          if (event.attachments && event.attachments[0] && event.attachments[0].type === 'photo') {
-            targetImageUrl = event.attachments[0].url;
-          } else if (event.messageReply && event.messageReply.attachments && event.messageReply.attachments[0].type === 'photo') {
-            targetImageUrl = event.messageReply.attachments[0].url;
-          }
-
-          if (!targetImageUrl) {
-            return api.sendMessage("Please send or reply to an image with /removebg !", threadID, event.messageID);
-          }
-
-          api.sendMessage("✂️ Removing background, please wait...", threadID);
-          const processedBgUrl = `https://image.pollinations.ai/prompt/remove%20background%20isolated%20on%20transparent?image=${encodeURIComponent(targetImageUrl)}`;
-          return downloadAndSendMedia(api, processedBgUrl, threadID, "png", event.messageID);
-        }
-
-        // 📸 COMMAND 2: /image <prompt>
-        if (messageText.startsWith('/image')) {
-          const prompt = messageText.replace('/image', '').trim();
-          if (!prompt) {
-            return api.sendMessage("Please provide a prompt! Example: /image cute cat", threadID, event.messageID);
-          }
-
-          api.sendMessage("🎨 Generating image, please wait...", threadID);
-          const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
-          return downloadAndSendMedia(api, imageUrl, threadID, "jpg", event.messageID);
-        }
-
-        // 🎵 COMMAND 3: /play or /music <title>
-        if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
-          const songQuery = messageText.replace(/\/play|\/music/, '').trim();
-          if (!songQuery) {
-            return api.sendMessage("Please provide a song title! Example: /play paradise by chase atlantic", threadID, event.messageID);
-          }
-
-          api.sendMessage(`🎵 Searching audio for "${songQuery}"...`, threadID);
-          try {
-            const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
-            if (deezerRes.data && deezerRes.data.data.length > 0) {
-              const track = deezerRes.data.data[0];
-              api.sendMessage(`🎶 Playing preview: ${track.title} - ${track.artist.name}`, threadID);
-              return downloadAndSendMedia(api, track.preview, threadID, "mp3", event.messageID);
-            } else {
-              return api.sendMessage(`❌ Song "${songQuery}" not found.`, threadID, event.messageID);
-            }
-          } catch (err) {
-            return api.sendMessage("❌ Failed to fetch audio record.", threadID, event.messageID);
+// 5. SEND MEDIA (IMAGE / AUDIO) API
+async function sendMediaMessage(senderPsid, url, type) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        recipient: { id: senderPsid },
+        message: {
+          attachment: {
+            type: type,
+            payload: { url: url, is_reusable: true }
           }
         }
       }
-    });
-  });
-}
-
-async function downloadAndSendMedia(api, url, threadID, extension, replyToID) {
-  const filePath = `./temp_${Date.now()}.${extension}`;
-  try {
-    const response = await axios({ url, method: 'GET', responseType: 'stream' });
-    const writer = fs.createWriteStream(filePath);
-    response.data.pipe(writer);
-
-    writer.on('finish', () => {
-      api.sendMessage({ attachment: fs.createReadStream(filePath) }, threadID, () => {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      }, replyToID);
-    });
+    );
   } catch (err) {
-    api.sendMessage("❌ Error processing media attachment.", threadID, replyToID);
+    console.error('❌ Error sending media:', err.response ? err.response.data : err.message);
   }
 }
+
+app.listen(PORT, () => console.log(`🚀 Webhook server running on port ${PORT}`));
