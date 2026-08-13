@@ -1,173 +1,114 @@
-const express = require('express');
+const login = require('fca-unofficial');
+const fs = require('fs');
 const axios = require('axios');
-const app = express();
 
-app.use(express.json());
+// Read appstate.json
+const appState = JSON.parse(fs.readFileSync('appstate.json', 'utf8'));
 
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+login({ appState }, (err, api) => {
+  if (err) return console.error("Login Error:", err);
 
-// Webhook Verification (Meta Messenger)
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+  console.log("Bot successfully logged in!");
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('WEBHOOK_VERIFIED');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  }
-});
+  // Listen for messages in DMs and Group Chats
+  api.listenMqtt(async (err, event) => {
+    if (err) return console.error(err);
 
-// Receiving Messages
-app.post('/webhook', (req, res) => {
-  const body = req.body;
+    if (event.type === "message" || event.type === "message_reply") {
+      const messageText = event.body ? event.body.trim() : "";
+      const threadID = event.threadID;
 
-  if (body.object === 'page') {
-    body.entry.forEach(entry => {
-      const webhook_event = entry.messaging[0];
-      const sender_psid = webhook_event.sender.id;
+      // ✂️ COMMAND 1: /removebg
+      if (messageText.startsWith('/removebg') || messageText.startsWith('/nobg')) {
+        let targetImageUrl = null;
 
-      if (webhook_event.message) {
-        handleMessage(sender_psid, webhook_event.message);
-      }
-    });
-
-    res.status(200).send('EVENT_RECEIVED');
-  } else {
-    res.sendStatus(404);
-  }
-});
-
-// Handle Incoming Commands
-async function handleMessage(sender_psid, received_message) {
-  const messageText = received_message.text ? received_message.text.trim() : "";
-  const attachments = received_message.attachments;
-
-  // ✂️ COMMAND 1: /removebg (KAPAG MAY SAMA O REPLY NA PICTURE)
-  if (messageText.startsWith('/removebg') || messageText.startsWith('/nobg')) {
-    let targetImageUrl = null;
-
-    // Check if the user attached an image with the command
-    if (attachments && attachments[0] && attachments[0].type === 'image') {
-      targetImageUrl = attachments[0].payload.url;
-    } 
-    // Check if user replied to an image message
-    else if (received_message.reply_to && received_message.reply_to.attachments && received_message.reply_to.attachments[0].type === 'image') {
-      targetImageUrl = received_message.reply_to.attachments[0].payload.url;
-    }
-
-    if (!targetImageUrl) {
-      return callSendAPI(sender_psid, { 
-        text: "Please send or reply to an image with the command /removebg !" 
-      });
-    }
-
-    await callSendAPI(sender_psid, { text: "✂️ Removing background, please wait..." });
-
-    // Free background removal service via Pollinations API
-    const processedBgUrl = `https://image.pollinations.ai/prompt/remove%20background%20isolated%20on%20transparent?image=${encodeURIComponent(targetImageUrl)}`;
-
-    return callSendAPI(sender_psid, {
-      attachment: {
-        type: "image",
-        payload: {
-          url: processedBgUrl,
-          is_reusable: true
+        if (event.attachments && event.attachments[0] && event.attachments[0].type === 'photo') {
+          targetImageUrl = event.attachments[0].url;
+        } else if (event.messageReply && event.messageReply.attachments && event.messageReply.attachments[0].type === 'photo') {
+          targetImageUrl = event.messageReply.attachments[0].url;
         }
-      }
-    });
-  }
 
-  // 📸 COMMAND 2: /image <prompt>
-  if (messageText.startsWith('/image')) {
-    const prompt = messageText.replace('/image', '').trim();
-
-    if (!prompt) {
-      return callSendAPI(sender_psid, { text: "Please provide a prompt! Example: /image cute cat" });
-    }
-
-    await callSendAPI(sender_psid, { text: "🎨 Generating image, please wait..." });
-
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
-
-    return callSendAPI(sender_psid, {
-      attachment: {
-        type: "image",
-        payload: {
-          url: imageUrl,
-          is_reusable: true
+        if (!targetImageUrl) {
+          return api.sendMessage("Please send or reply to an image with /removebg !", threadID, event.messageID);
         }
+
+        api.sendMessage("✂️ Removing background, please wait...", threadID);
+
+        const processedBgUrl = `https://image.pollinations.ai/prompt/remove%20background%20isolated%20on%20transparent?image=${encodeURIComponent(targetImageUrl)}`;
+        
+        return downloadAndSendMedia(api, processedBgUrl, threadID, "png", event.messageID);
       }
-    });
-  } 
 
-  // 🎵 COMMAND 3: /play or /music <title>
-  if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
-    const songQuery = messageText.replace(/\/play|\/music/, '').trim();
+      // 📸 COMMAND 2: /image <prompt>
+      if (messageText.startsWith('/image')) {
+        const prompt = messageText.replace('/image', '').trim();
 
-    if (!songQuery) {
-      return callSendAPI(sender_psid, { text: "Please provide a song title! Example: /play paradise by chase atlantic" });
-    }
+        if (!prompt) {
+          return api.sendMessage("Please provide a prompt! Example: /image cute cat", threadID, event.messageID);
+        }
 
-    await callSendAPI(sender_psid, { text: `🎵 Searching audio for "${songQuery}"...` });
+        api.sendMessage("🎨 Generating image, please wait...", threadID);
 
-    try {
-      const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
 
-      if (deezerRes.data && deezerRes.data.data.length > 0) {
-        const track = deezerRes.data.data[0];
-        const audioUrl = track.preview;
+        return downloadAndSendMedia(api, imageUrl, threadID, "jpg", event.messageID);
+      }
 
-        await callSendAPI(sender_psid, { text: `🎶 Playing preview: ${track.title} - ${track.artist.name}` });
+      // 🎵 COMMAND 3: /play or /music <title>
+      if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
+        const songQuery = messageText.replace(/\/play|\/music/, '').trim();
 
-        return callSendAPI(sender_psid, {
-          attachment: {
-            type: "audio",
-            payload: {
-              url: audioUrl,
-              is_reusable: true
-            }
+        if (!songQuery) {
+          return api.sendMessage("Please provide a song title! Example: /play paradise by chase atlantic", threadID, event.messageID);
+        }
+
+        api.sendMessage(`🎵 Searching audio for "${songQuery}"...`, threadID);
+
+        try {
+          const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
+
+          if (deezerRes.data && deezerRes.data.data.length > 0) {
+            const track = deezerRes.data.data[0];
+            const audioUrl = track.preview;
+
+            api.sendMessage(`🎶 Playing preview: ${track.title} - ${track.artist.name}`, threadID);
+
+            return downloadAndSendMedia(api, audioUrl, threadID, "mp3", event.messageID);
+          } else {
+            return api.sendMessage(`❌ Song "${songQuery}" not found. Try another title!`, threadID, event.messageID);
           }
-        });
-      } else {
-        return callSendAPI(sender_psid, { text: `❌ Song "${songQuery}" not found. Try another title!` });
+        } catch (err) {
+          console.error("Audio error:", err.message);
+          return api.sendMessage("❌ Failed to fetch audio record. Please try again.", threadID, event.messageID);
+        }
       }
-    } catch (err) {
-      console.error("Audio error:", err.message);
-      return callSendAPI(sender_psid, { text: "❌ Failed to fetch audio record. Please try again." });
     }
-  } 
+  });
+});
 
-  // ❓ DEFAULT RESPONSE
-  if (messageText) {
-    callSendAPI(sender_psid, { 
-      text: `Received: "${messageText}".\n\nAvailable commands:\n📸 /image <prompt>\n🎵 /play <song title>\n✂️ /removebg (send or reply to a photo)` 
+// Helper function to download file and send as stream attachment
+async function downloadAndSendMedia(api, url, threadID, extension, replyToID) {
+  const filePath = `./temp_${Date.now()}.${extension}`;
+  try {
+    const response = await axios({
+      url,
+      method: 'GET',
+      responseType: 'stream'
     });
+
+    const writer = fs.createWriteStream(filePath);
+    response.data.pipe(writer);
+
+    writer.on('finish', () => {
+      const msg = {
+        attachment: fs.createReadStream(filePath)
+      };
+      api.sendMessage(msg, threadID, () => {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // Clean up temp file
+      }, replyToID);
+    });
+  } catch (err) {
+    console.error("Download media error:", err.message);
+    api.sendMessage("❌ Error processing media attachment.", threadID, replyToID);
   }
 }
-
-// Send Message via Graph API
-function callSendAPI(sender_psid, response) {
-  const request_body = {
-    recipient: {
-      id: sender_psid
-    },
-    message: response
-  };
-
-  axios.post(`https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, request_body)
-    .then(() => {
-      console.log('Message sent!');
-    })
-    .catch(err => {
-      console.error('Attachment error:', err.response ? err.response.data : err.message);
-    });
-}
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
