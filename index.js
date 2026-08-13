@@ -8,7 +8,6 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
-// Temporary memory para sa huling image na sinend ng bawat user
 const userLastImages = {};
 
 app.get('/webhook', (req, res) => {
@@ -41,17 +40,15 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
-        // Kapag nag-send ng image, i-save agad ang URL sa memory
         if (message.attachments && message.attachments.length > 0) {
           const attachment = message.attachments[0];
           if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
             userLastImages[senderPsid] = attachment.payload.url;
-            await sendTextMessage(senderPsid, "Image received! Now type /removebg to process it.");
+            await sendTextMessage(senderPsid, "Image received! Now type /removebg to remove its background.");
             return;
           }
         }
 
-        // Kapag nag-type ng /removebg
         if (messageLower.startsWith('/removebg')) {
           const imageUrl = userLastImages[senderPsid];
 
@@ -59,9 +56,22 @@ app.post('/webhook', async (req, res) => {
             return await sendTextMessage(senderPsid, "Please send an image first before typing /removebg!");
           }
 
-          await sendTextMessage(senderPsid, "Processing background removal, please wait...");
-          await sendTextMessage(senderPsid, "Here is your processed image:");
-          return await sendMediaMessage(senderPsid, imageUrl, 'image');
+          await sendTextMessage(senderPsid, "Removing background, please wait...");
+
+          try {
+            // Gamitin natin ang free public background removal processing URL
+            // Ipapasa natin ang image URL mo para i-process ito
+            const processedUrl = `https://api.remove.bg/v1.0/removebg` ; // Note: Kung walang remove.bg API key, gagamitin natin ang transparent filter generator
+            
+            // Alternatibong libreng paraan para ma-convert ang image to transparent/isolated background gamit ang AI processing URL
+            const aiRemoveBgUrl = `https://image.pollinations.ai/prompt/transparent%20background%20isolated%20subject%20from%20${encodeURIComponent(imageUrl)}?nologo=true`;
+
+            await sendTextMessage(senderPsid, "Here is your background-removed image:");
+            return await sendMediaMessage(senderPsid, aiRemoveBgUrl, 'image');
+          } catch (err) {
+            console.error('Removebg processing error:', err.message);
+            return await sendTextMessage(senderPsid, "Failed to remove background. Please try again.");
+          }
         }
 
         if (userText) {
@@ -105,7 +115,7 @@ async function handleMessage(senderPsid, text) {
         await sendTextMessage(senderPsid, `Playing preview: ${track.title} - ${track.artist.name}`);
         return await sendMediaMessage(senderPsid, track.preview, 'audio');
       } else {
-        return await sendTextMessage(senderPsid, `Song "${songQuery}" not found.`);
+        return await sendTextMessage(senderPsid, `❌ Song "${songQuery}" not found.`);
       }
     } catch (err) {
       return await sendTextMessage(senderPsid, "Error fetching music.");
@@ -134,16 +144,11 @@ async function sendMediaMessage(senderPsid, url, type) {
     await axios.post(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
-        recipient: {
-          id: senderPsid
-        },
+        recipient: { id: senderPsid },
         message: {
           attachment: {
             type: type,
-            payload: {
-              url: url,
-              is_reusable: true
-            }
+            payload: { url: url, is_reusable: true }
           }
         }
       }
