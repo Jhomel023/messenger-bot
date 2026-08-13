@@ -143,7 +143,7 @@ async function handleMessage(senderPsid, text, messageLower) {
 
     try {
       const geminiRes = await axios.post(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
           contents: [
             {
@@ -185,7 +185,7 @@ async function handleMessage(senderPsid, text, messageLower) {
   // --- GEMINI AI CHAT ---
   try {
     const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [
           {
@@ -224,11 +224,16 @@ async function sendMediaMessage(senderPsid, url, type) {
     await axios.post(
       `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
-        recipient: { id: senderPsid },
+        recipient: {
+          id: senderPsid
+        },
         message: {
           attachment: {
             type: type,
-            payload: { url: url, is_reusable: true }
+            payload: {
+              url: url,
+              is_reusable: true
+            }
           }
         }
       }
