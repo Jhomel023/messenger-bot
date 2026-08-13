@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
-const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(express.json());
@@ -11,9 +10,6 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 3000;
-
-// Initialize Google Gen AI SDK
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 const userLastImages = {};
 
@@ -100,7 +96,6 @@ app.post('/webhook', async (req, res) => {
 });
 
 async function handleMessage(senderPsid, text, messageLower) {
-  // Kunin ang mismong text kung may kasamang /gemini command man o wala
   let cleanText = text;
   if (messageLower.startsWith('/gemini')) {
     cleanText = text.replace(/^\/gemini/i, '').trim();
@@ -147,15 +142,24 @@ async function handleMessage(senderPsid, text, messageLower) {
     await sendTextMessage(senderPsid, "🧮 Solving math problem accurately...");
 
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `You are an expert mathematician. Solve the following math problem accurately with clear step-by-step explanations in English: ${mathQuery}`,
-      });
+      const geminiRes = await axios.post(
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: [
+            {
+              parts: [
+                { text: `You are an expert mathematician. Solve the following math problem accurately with clear step-by-step explanations in English: ${mathQuery}` }
+              ]
+            }
+          ]
+        }
+      );
 
-      return await sendTextMessage(senderPsid, `🧮 **Math Solution:**\n\n${response.text}`);
+      const mathReply = geminiRes.data.candidates[0].content.parts[0].text || "I couldn't solve this math problem.";
+      return await sendTextMessage(senderPsid, `🧮 **Math Solution:**\n\n${mathReply}`);
     } catch (err) {
-      console.error('Math Solver Error:', err);
-      return await sendTextMessage(senderPsid, "❌ An error occurred while solving the math problem.");
+      console.error('Math Solver Error:', err.response ? err.response.data : err.message);
+      return await sendTextMessage(senderPsid, "❌ An error occurred while solving the math problem. Please try again.");
     }
   }
 
@@ -178,16 +182,25 @@ async function handleMessage(senderPsid, text, messageLower) {
     }
   }
 
-  // --- GEMINI AI CHAT (Using official SDK) ---
+  // --- GEMINI AI CHAT ---
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Please answer the following question in English only: ${cleanText}`,
-    });
+    const geminiRes = await axios.post(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        contents: [
+          {
+            parts: [
+              { text: `Please answer the following question in English only: ${cleanText}` }
+            ]
+          }
+        ]
+      }
+    );
 
-    return await sendTextMessage(senderPsid, response.text || "I couldn't generate a response.");
+    const aiReply = geminiRes.data.candidates[0].content.parts[0].text || "I couldn't generate a response.";
+    return await sendTextMessage(senderPsid, aiReply);
   } catch (err) {
-    console.error('Gemini SDK Error:', err);
+    console.error('Gemini Error:', err.response ? err.response.data : err.message);
     return await sendTextMessage(senderPsid, "An error occurred with the AI. Please try again later.");
   }
 }
