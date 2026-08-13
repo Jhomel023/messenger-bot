@@ -8,6 +8,9 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
+// Temporary storage para sa huling image ng user sakaling hindi gumana ang reply
+const userLastImages = {};
+
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -38,27 +41,49 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
-        if (message.reply_to && message.reply_to.mid) {
-          try {
-            const repliedMsgRes = await axios.get(
-              `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
-            );
-
-            if (repliedMsgRes.data && repliedMsgRes.data.attachments) {
-              const attachment = repliedMsgRes.data.attachments[0];
-              if (attachment.type === 'image' && messageLower.startsWith('/removebg')) {
-                const imageUrl = attachment.payload.url;
-                console.log(`✂️ Processing removebg for replied image from ${senderPsid}`);
-
-                await sendTextMessage(senderPsid, "Removing background, please wait...");
-                
-                await sendTextMessage(senderPsid, "Here is your processed image:");
-                return await sendMediaMessage(senderPsid, imageUrl, 'image');
-              }
-            }
-          } catch (err) {
-            console.error('❌ Error fetching replied message:', err.response ? err.response.data : err.message);
+        // 1. Kapag nag-send ng image, i-save agad natin sa memory
+        if (message.attachments && message.attachments.length > 0) {
+          const attachment = message.attachments[0];
+          if (attachment.type === 'image') {
+            userLastImages[senderPsid] = attachment.payload.url;
+            await sendTextMessage(senderPsid, "Image received! Reply to this picture with /removebg");
+            return;
           }
+        }
+
+        // 2. Kapag nag-type ng /removebg
+        if (messageLower.startsWith('/removebg')) {
+          let imageUrl = null;
+
+          // Subukang kunin sa reply kung meronman
+          if (message.reply_to && message.reply_to.mid) {
+            try {
+              const repliedMsgRes = await axios.get(
+                `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
+              );
+              if (repliedMsgRes.data && repliedMsgRes.data.attachments) {
+                const att = repliedMsgRes.data.attachments[0];
+                if (att.type === 'image') {
+                  imageUrl = att.payload.url;
+                }
+              }
+            } catch (err) {
+              console.error('Error fetching reply:', err.message);
+            }
+          }
+
+          // Kung walang nakuha sa reply, gamitin ang huling sinend na image
+          if (!imageUrl) {
+            imageUrl = userLastImages[senderPsid];
+          }
+
+          if (!imageUrl) {
+            return await sendTextMessage(senderPsid, "Please send an image first or reply to an image with /removebg!");
+          }
+
+          await sendTextMessage(senderPsid, "Removing background, please wait...");
+          await sendTextMessage(senderPsid, "Here is your processed image:");
+          return await sendMediaMessage(senderPsid, imageUrl, 'image');
         }
 
         if (userText) {
@@ -109,6 +134,7 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
+  // Command list (Hindi na mapapasok dito ang /removebg)
   return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to an image)`);
 }
 
