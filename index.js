@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,9 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 3000;
+
+// Initialize Google Gen AI SDK
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 const userLastImages = {};
 
@@ -96,6 +100,15 @@ app.post('/webhook', async (req, res) => {
 });
 
 async function handleMessage(senderPsid, text, messageLower) {
+  // Kunin ang mismong text kung may kasamang /gemini command man o wala
+  let cleanText = text;
+  if (messageLower.startsWith('/gemini')) {
+    cleanText = text.replace(/^\/gemini/i, '').trim();
+    if (!cleanText) {
+      return await sendTextMessage(senderPsid, "❌ Please type your question after /gemini. Example: /gemini What is gravity?");
+    }
+  }
+
   // --- COMPLETE COMMAND LIST & WELCOME MENU ---
   if (messageLower === '/help' || messageLower === '/menu' || messageLower === 'menu' || messageLower === 'start' || messageLower === 'hi' || messageLower === 'hello') {
     const completeCommandList = 
@@ -104,19 +117,15 @@ async function handleMessage(senderPsid, text, messageLower) {
       "🤖 ══════════════════ 🤖\n\n" +
       "Here is the complete list of commands and features you can use:\n\n" +
       "📌 **AI Image Generation**\n" +
-      "   • Syntax: `/image [description]`\n" +
-      "   • Example: `/image futuristic cyberpunk city`\n\n" +
+      "   • Syntax: `/image [description]`\n\n" +
       "🧮 **Accurate Math Solver**\n" +
-      "   • Syntax: `/math [equation or problem]`\n" +
-      "   • Example: `/math 2x + 5 = 15` or `/math 50 * 2 + 10`\n\n" +
+      "   • Syntax: `/math [equation or problem]`\n\n" +
       "🎵 **Music Search & Preview**\n" +
-      "   • Syntax: `/play [song title]` or `/music [song title]`\n" +
-      "   • Example: `/play Panalangin`\n\n" +
+      "   • Syntax: `/play [song title]` or `/music [song title]`\n\n" +
       "🖼️ **Background Remover**\n" +
-      "   • Step 1: Send an image to the chat.\n" +
-      "   • Step 2: Type `/removebg`\n\n" +
+      "   • Send image -> Type `/removebg`\n\n" +
       "💬 **Gemini AI Chat**\n" +
-      "   • Just type any question or message normally to chat with the AI in English!\n\n" +
+      "   • Type `/gemini [question]` or message normally in English!\n\n" +
       "Type any of these commands anytime to get started!";
     
     return await sendTextMessage(senderPsid, completeCommandList);
@@ -138,31 +147,22 @@ async function handleMessage(senderPsid, text, messageLower) {
     await sendTextMessage(senderPsid, "🧮 Solving math problem accurately...");
 
     try {
-      const mathRes = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          contents: [
-            {
-              parts: [
-                { text: `You are an expert mathematician. Solve the following math problem accurately with clear step-by-step explanations in English: ${mathQuery}` }
-              ]
-            }
-          ]
-        }
-      );
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `You are an expert mathematician. Solve the following math problem accurately with clear step-by-step explanations in English: ${mathQuery}`,
+      });
 
-      const mathReply = mathRes.data.candidates[0].content.parts[0].text || "I couldn't solve this math problem.";
-      return await sendTextMessage(senderPsid, `🧮 **Math Solution:**\n\n${mathReply}`);
+      return await sendTextMessage(senderPsid, `🧮 **Math Solution:**\n\n${response.text}`);
     } catch (err) {
-      console.error('Math Solver Error:', err.response ? err.response.data : err.message);
-      return await sendTextMessage(senderPsid, "❌ An error occurred while solving the math problem. Please try again.");
+      console.error('Math Solver Error:', err);
+      return await sendTextMessage(senderPsid, "❌ An error occurred while solving the math problem.");
     }
   }
 
   // --- MUSIC PREVIEW ---
   if (messageLower.startsWith('/play') || messageLower.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
-    if (!songQuery) return await sendTextMessage(senderPsid, "❌ Please provide a song title!\nExample: /play Panalangin");
+    if (!songQuery) return await sendTextMessage(senderPsid, "❌ Please provide a song title!");
     await sendTextMessage(senderPsid, `🎵 Searching audio for "${songQuery}"...`);
     try {
       const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
@@ -178,25 +178,16 @@ async function handleMessage(senderPsid, text, messageLower) {
     }
   }
 
-  // --- GEMINI AI CHAT ---
+  // --- GEMINI AI CHAT (Using official SDK) ---
   try {
-    const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        contents: [
-          {
-            parts: [
-              { text: `Please answer the following question in English only: ${text}` }
-            ]
-          }
-        ]
-      }
-    );
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Please answer the following question in English only: ${cleanText}`,
+    });
 
-    const aiReply = geminiRes.data.candidates[0].content.parts[0].text || "I couldn't generate a response.";
-    return await sendTextMessage(senderPsid, aiReply);
+    return await sendTextMessage(senderPsid, response.text || "I couldn't generate a response.");
   } catch (err) {
-    console.error('Gemini Error:', err.response ? err.response.data : err.message);
+    console.error('Gemini SDK Error:', err);
     return await sendTextMessage(senderPsid, "An error occurred with the AI. Please try again later.");
   }
 }
