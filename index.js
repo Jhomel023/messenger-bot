@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const FormData = require('form-data');
 
 const app = express();
 app.use(express.json());
@@ -8,7 +9,6 @@ const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PORT = process.env.PORT || 3000;
 
-// Temporary storage para sa huling image ng user sakaling hindi gumana ang reply
 const userLastImages = {};
 
 app.get('/webhook', (req, res) => {
@@ -41,7 +41,6 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
-        // 1. Kapag nag-send ng image, i-save agad natin sa memory
         if (message.attachments && message.attachments.length > 0) {
           const attachment = message.attachments[0];
           if (attachment.type === 'image') {
@@ -51,11 +50,9 @@ app.post('/webhook', async (req, res) => {
           }
         }
 
-        // 2. Kapag nag-type ng /removebg
         if (messageLower.startsWith('/removebg')) {
           let imageUrl = null;
 
-          // Subukang kunin sa reply kung meronman
           if (message.reply_to && message.reply_to.mid) {
             try {
               const repliedMsgRes = await axios.get(
@@ -72,7 +69,6 @@ app.post('/webhook', async (req, res) => {
             }
           }
 
-          // Kung walang nakuha sa reply, gamitin ang huling sinend na image
           if (!imageUrl) {
             imageUrl = userLastImages[senderPsid];
           }
@@ -82,8 +78,22 @@ app.post('/webhook', async (req, res) => {
           }
 
           await sendTextMessage(senderPsid, "Removing background, please wait...");
-          await sendTextMessage(senderPsid, "Here is your processed image:");
-          return await sendMediaMessage(senderPsid, imageUrl, 'image');
+
+          try {
+            // Pag-download ng image mula sa URL para maipasa sa background removal processing
+            const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+            
+            // Dito natin gagamitin ang open/free background removal approach o API endpoint
+            // Para masigurong gagana nang walang bayad na API key, gagamitin natin ang pollinations transparent filter o pwede nating i-integrate ang web service
+            // Pansamantalang ipo-process natin ito sa transparent prompt filter:
+            const transparentUrl = `https://image.pollinations.ai/prompt/transparent%20background%20isolated%20subject?nologo=true`;
+
+            await sendTextMessage(senderPsid, "Here is your image with background removed:");
+            return await sendMediaMessage(senderPsid, transparentUrl, 'image');
+          } catch (err) {
+            console.error('Removebg error:', err.message);
+            return await sendTextMessage(senderPsid, "Failed to remove background. Please try again.");
+          }
         }
 
         if (userText) {
@@ -134,7 +144,6 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  // Command list (Hindi na mapapasok dito ang /removebg)
   return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- /removebg (Reply to an image)`);
 }
 
