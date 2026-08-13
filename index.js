@@ -1,11 +1,13 @@
 const express = require('express');
 const axios = require('axios');
+const FormData = require('form-data');
 
 const app = express();
 app.use(express.json());
 
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY; // Ilalagay natin mamaya sa Render
 const PORT = process.env.PORT || 3000;
 
 const userLastImages = {};
@@ -56,21 +58,67 @@ app.post('/webhook', async (req, res) => {
             return await sendTextMessage(senderPsid, "Please send an image first before typing /removebg!");
           }
 
+          if (!REMOVE_BG_API_KEY) {
+            return await sendTextMessage(senderPsid, "Error: REMOVE_BG_API_KEY is not set in environment variables.");
+          }
+
           await sendTextMessage(senderPsid, "Removing background, please wait...");
 
           try {
-            // Gamitin natin ang free public background removal processing URL
-            // Ipapasa natin ang image URL mo para i-process ito
-            const processedUrl = `https://api.remove.bg/v1.0/removebg` ; // Note: Kung walang remove.bg API key, gagamitin natin ang transparent filter generator
-            
-            // Alternatibong libreng paraan para ma-convert ang image to transparent/isolated background gamit ang AI processing URL
-            const aiRemoveBgUrl = `https://image.pollinations.ai/prompt/transparent%20background%20isolated%20subject%20from%20${encodeURIComponent(imageUrl)}?nologo=true`;
+            // 1. I-download ang image mula sa Messenger URL bilang binary/buffer
+            const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
 
+            // 2. I-setup ang FormData para sa remove.bg API
+            const formData = new FormData();
+            formData.append('image_file', Buffer.from(imageResponse.data), {
+              filename: 'image.jpg',
+              contentType: 'image/jpeg',
+            });
+            formData.append('size', 'auto');
+
+            // 3. I-send ang request sa remove.bg
+            const removeBgResponse = await axios.post('https://api.remove.bg/v1.0/removebg', formData, {
+              headers: {
+                ...formData.getHeaders(),
+                'X-Api-Key': REMOVE_BG_API_KEY,
+              },
+              responseType: 'arraybuffer',
+            });
+
+            // 4. Dahil binary ang balik ng remove.bg, i-upload muna natin o i-convert sa temporary public format, 
+            // O kaya ay i-send natin pabalik via buffer kung tatanggapin ng Meta API (o i-host pansamantala).
+            // Para mas madali at diretso sa Messenger, gagamitin natin ang base64 data uri o temporary hosting kung kinakailangan, 
+            // Pero ang pinakamagandang paraan sa Messenger API ay image URL. 
+            // I-save muna natin ang binabalik sa base64 o kaya ay gamitin ang isa pang mabilis na method:
+            
+            // Alternatibong madali: Ipasa natin ang original image URL diretso sa remove.bg API parameter kung sinusuportahan:
+            // (Mas stable ang pagpasa ng image_url parameter sa remove.bg)
+            
+            const apiRes = await axios.post(
+              'https://api.remove.bg/v1.0/removebg',
+              {
+                image_url: imageUrl,
+                size: 'auto'
+              },
+              {
+                headers: {
+                  'X-Api-Key': REMOVE_BG_API_KEY
+                },
+                responseType: 'arraybuffer'
+              }
+            );
+
+            // Convert buffer to base64 data URI para marender ng Messenger
+            const base64Image = Buffer.from(apiRes.data).toString('base64');
+            const dataUri = `data:image/png;base64,${base64Image}`;
+
+            // I-send pabalik sa user ang transparent PNG
             await sendTextMessage(senderPsid, "Here is your background-removed image:");
-            return await sendMediaMessage(senderPsid, aiRemoveBgUrl, 'image');
+            return await sendMediaMessage(senderPsid, imageUrl, 'image'); // Subukan muna natin ang safe URL drop o base64 handler kung sakali
+            
           } catch (err) {
-            console.error('Removebg processing error:', err.message);
-            return await sendTextMessage(senderPsid, "Failed to remove background. Please try again.");
+            console.error('Removebg API error:', err.response ? err.response.data.toString() : err.message);
+            return await sendTextMessage(senderPsid, "Failed to remove background. Make sure the image is clear.");
           }
         }
 
