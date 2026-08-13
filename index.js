@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(express.json());
@@ -8,7 +9,11 @@ app.use(express.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Ilalagay mamaya sa Render
 const PORT = process.env.PORT || 3000;
+
+// Initialize Google Gen AI
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 const userLastImages = {};
 
@@ -46,69 +51,43 @@ app.post('/webhook', async (req, res) => {
           const attachment = message.attachments[0];
           if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
             userLastImages[senderPsid] = attachment.payload.url;
-            await sendTextMessage(senderPsid, "Image received! Now type /removebg to remove its background.");
+            await sendTextMessage(senderPsid, "Image received! Type /removebg to remove background.");
             return;
           }
         }
 
         if (messageLower.startsWith('/removebg')) {
           const imageUrl = userLastImages[senderPsid];
+          if (!imageUrl) return await sendTextMessage(senderPsid, "Please send an image first!");
+          if (!REMOVE_BG_API_KEY) return await sendTextMessage(senderPsid, "Error: REMOVE_BG_API_KEY is missing.");
 
-          if (!imageUrl) {
-            return await sendTextMessage(senderPsid, "Please send an image first before typing /removebg!");
-          }
-
-          if (!REMOVE_BG_API_KEY) {
-            return await sendTextMessage(senderPsid, "Error: REMOVE_BG_API_KEY is not set in environment variables.");
-          }
-
-          await sendTextMessage(senderPsid, "Removing background using remove.bg, please wait...");
-
+          await sendTextMessage(senderPsid, "Removing background, please wait...");
           try {
-            // 1. I-send ang request sa remove.bg gamit ang image_url
             const apiRes = await axios.post(
               'https://api.remove.bg/v1.0/removebg',
-              {
-                image_url: imageUrl,
-                size: 'auto'
-              },
-              {
-                headers: {
-                  'X-Api-Key': REMOVE_BG_API_KEY
-                },
-                responseType: 'arraybuffer'
-              }
+              { image_url: imageUrl, size: 'auto' },
+              { headers: { 'X-Api-Key': REMOVE_BG_API_KEY }, responseType: 'arraybuffer' }
             );
 
-            // 2. I-upload ang resulting PNG buffer sa Catbox.moe (libre at mabilis na temporary image host para makuha ang public URL)
             const uploadForm = new FormData();
             uploadForm.append('reqtype', 'fileupload');
-            uploadForm.append('fileToUpload', Buffer.from(apiRes.data), {
-              filename: 'no-bg.png',
-              contentType: 'image/png'
-            });
+            uploadForm.append('fileToUpload', Buffer.from(apiRes.data), { filename: 'no-bg.png', contentType: 'image/png' });
 
-            const uploadRes = await axios.post('https://catbox.moe/user/api.php', uploadForm, {
-              headers: uploadForm.getHeaders()
-            });
-
+            const uploadRes = await axios.post('https://catbox.moe/user/api.php', uploadForm, { headers: uploadForm.getHeaders() });
             const transparentImageUrl = uploadRes.data.trim();
 
             if (transparentImageUrl.startsWith('http')) {
               await sendTextMessage(senderPsid, "Here is your background-removed image:");
               return await sendMediaMessage(senderPsid, transparentImageUrl, 'image');
             } else {
-              throw new Error("Failed to upload processed image.");
+              throw new Error("Upload failed");
             }
-
           } catch (err) {
-            console.error('Removebg API error:', err.response ? err.response.data.toString() : err.message);
-            return await sendTextMessage(senderPsid, "Failed to remove background. Please check your API key or try another image.");
+            return await sendTextMessage(senderPsid, "Failed to remove background.");
           }
         }
 
         if (userText) {
-          console.log(`📩 Message from ${senderPsid}: "${userText}"`);
           await handleMessage(senderPsid, userText);
         }
       }
@@ -125,21 +104,15 @@ async function handleMessage(senderPsid, text) {
 
   if (messageText.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
-    if (!prompt) {
-      return await sendTextMessage(senderPsid, "Please provide a prompt! Example: /image cute cat");
-    }
-
-    await sendTextMessage(senderPsid, "Generating image, please wait...");
+    if (!prompt) return await sendTextMessage(senderPsid, "Please provide a prompt! Example: /image cute cat");
+    await sendTextMessage(senderPsid, "Generating image...");
     const genImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
     return await sendMediaMessage(senderPsid, genImageUrl, 'image');
   }
 
   if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
-    if (!songQuery) {
-      return await sendTextMessage(senderPsid, "Please provide a song title! Example: /play paradise chase atlantic");
-    }
-
+    if (!songQuery) return await sendTextMessage(senderPsid, "Please provide a song title!");
     await sendTextMessage(senderPsid, `Searching audio for "${songQuery}"...`);
     try {
       const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
@@ -148,14 +121,27 @@ async function handleMessage(senderPsid, text) {
         await sendTextMessage(senderPsid, `Playing preview: ${track.title} - ${track.artist.name}`);
         return await sendMediaMessage(senderPsid, track.preview, 'audio');
       } else {
-        return await sendTextMessage(senderPsid, `❌ Song "${songQuery}" not found.`);
+        return await sendTextMessage(senderPsid, `❌ Song not found.`);
       }
     } catch (err) {
       return await sendTextMessage(senderPsid, "Error fetching music.");
     }
   }
 
-  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>`);
+  // --- GEMINI AI CHAT INTEGRATION ---
+  try {
+    // Gumagamit tayo ng gemini-2.5-flash para sa mabilis at matalinong sagot
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: text,
+    });
+
+    const aiReply = response.text || "Walang maisip na sagot si Gemini.";
+    return await sendTextMessage(senderPsid, aiReply);
+  } catch (err) {
+    console.error('Gemini Error:', err);
+    return await sendTextMessage(senderPsid, "May nangyaring error sa AI. Subukan ulit mamaya.");
+  }
 }
 
 async function sendTextMessage(senderPsid, text) {
