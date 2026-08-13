@@ -124,10 +124,10 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  // --- GEMINI AI CHAT (FORCED ENGLISH RESPONSE) ---
+  // --- GEMINI AI CHAT (USING gemini-1.5-flash) ---
   try {
     const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [
           {
