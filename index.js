@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
-const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(express.json());
@@ -9,11 +8,8 @@ app.use(express.json());
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Ilalagay mamaya sa Render
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 3000;
-
-// Initialize Google Gen AI
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 const userLastImages = {};
 
@@ -128,18 +124,23 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  // --- GEMINI AI CHAT INTEGRATION ---
+  // --- GEMINI AI CHAT (VIA DIRECT AXIOS API) ---
   try {
-    // Gumagamit tayo ng gemini-2.5-flash para sa mabilis at matalinong sagot
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: text,
-    });
+    const geminiRes = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        contents: [
+          {
+            parts: [{ text: text }]
+          }
+        ]
+      }
+    );
 
-    const aiReply = response.text || "Walang maisip na sagot si Gemini.";
+    const aiReply = geminiRes.data.candidates[0].content.parts[0].text || "Walang maisip na sagot si Gemini.";
     return await sendTextMessage(senderPsid, aiReply);
   } catch (err) {
-    console.error('Gemini Error:', err);
+    console.error('Gemini Error:', err.response ? err.response.data : err.message);
     return await sendTextMessage(senderPsid, "May nangyaring error sa AI. Subukan ulit mamaya.");
   }
 }
