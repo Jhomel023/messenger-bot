@@ -47,17 +47,17 @@ app.post('/webhook', async (req, res) => {
           const attachment = message.attachments[0];
           if (attachment.type === 'image' && attachment.payload && attachment.payload.url) {
             userLastImages[senderPsid] = attachment.payload.url;
-            await sendTextMessage(senderPsid, "Image received! Type /removebg to remove background.");
+            await sendTextMessage(senderPsid, "📷 Image received! Send /removebg to remove its background.");
             return;
           }
         }
 
         if (messageLower.startsWith('/removebg')) {
           const imageUrl = userLastImages[senderPsid];
-          if (!imageUrl) return await sendTextMessage(senderPsid, "Please send an image first!");
+          if (!imageUrl) return await sendTextMessage(senderPsid, "❌ Please send an image first before using /removebg!");
           if (!REMOVE_BG_API_KEY) return await sendTextMessage(senderPsid, "Error: REMOVE_BG_API_KEY is missing.");
 
-          await sendTextMessage(senderPsid, "Removing background, please wait...");
+          await sendTextMessage(senderPsid, "⏳ Removing background, please wait...");
           try {
             const apiRes = await axios.post(
               'https://api.remove.bg/v1.0/removebg',
@@ -73,18 +73,18 @@ app.post('/webhook', async (req, res) => {
             const transparentImageUrl = uploadRes.data.trim();
 
             if (transparentImageUrl.startsWith('http')) {
-              await sendTextMessage(senderPsid, "Here is your background-removed image:");
+              await sendTextMessage(senderPsid, "✨ Here is your background-removed image:");
               return await sendMediaMessage(senderPsid, transparentImageUrl, 'image');
             } else {
               throw new Error("Upload failed");
             }
           } catch (err) {
-            return await sendTextMessage(senderPsid, "Failed to remove background.");
+            return await sendTextMessage(senderPsid, "❌ Failed to remove background.");
           }
         }
 
         if (userText) {
-          await handleMessage(senderPsid, userText);
+          await handleMessage(senderPsid, userText, messageLower);
         }
       }
     });
@@ -95,39 +95,93 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-async function handleMessage(senderPsid, text) {
-  const messageText = text.toLowerCase();
+async function handleMessage(senderPsid, text, messageLower) {
+  // --- COMPLETE COMMAND LIST & WELCOME MENU ---
+  if (messageLower === '/help' || messageLower === '/menu' || messageLower === 'menu' || messageLower === 'start' || messageLower === 'hi' || messageLower === 'hello') {
+    const completeCommandList = 
+      "🤖 ══════════════════ 🤖\n" +
+      "        ✨ BOT NI JHOMEL ✨\n" +
+      "🤖 ══════════════════ 🤖\n\n" +
+      "Here is the complete list of commands and features you can use:\n\n" +
+      "📌 **AI Image Generation**\n" +
+      "   • Syntax: `/image [description]`\n" +
+      "   • Example: `/image futuristic cyberpunk city`\n\n" +
+      "🧮 **Accurate Math Solver**\n" +
+      "   • Syntax: `/math [equation or problem]`\n" +
+      "   • Example: `/math 2x + 5 = 15` or `/math 50 * 2 + 10`\n\n" +
+      "🎵 **Music Search & Preview**\n" +
+      "   • Syntax: `/play [song title]` or `/music [song title]`\n" +
+      "   • Example: `/play Panalangin`\n\n" +
+      "🖼️ **Background Remover**\n" +
+      "   • Step 1: Send an image to the chat.\n" +
+      "   • Step 2: Type `/removebg`\n\n" +
+      "💬 **Gemini AI Chat**\n" +
+      "   • Just type any question or message normally to chat with the AI in English!\n\n" +
+      "Type any of these commands anytime to get started!";
+    
+    return await sendTextMessage(senderPsid, completeCommandList);
+  }
 
-  if (messageText.startsWith('/image')) {
+  // --- AI IMAGE GENERATION ---
+  if (messageLower.startsWith('/image')) {
     const prompt = text.replace('/image', '').trim();
-    if (!prompt) return await sendTextMessage(senderPsid, "Please provide a prompt! Example: /image cute cat");
-    await sendTextMessage(senderPsid, "Generating image...");
+    if (!prompt) return await sendTextMessage(senderPsid, "❌ Please provide a prompt!\nExample: /image cute cat");
+    await sendTextMessage(senderPsid, "🎨 Generating image, please wait...");
     const genImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
     return await sendMediaMessage(senderPsid, genImageUrl, 'image');
   }
 
-  if (messageText.startsWith('/play') || messageText.startsWith('/music')) {
+  // --- ACCURATE MATH SOLVER ---
+  if (messageLower.startsWith('/math')) {
+    const mathQuery = text.replace('/math', '').trim();
+    if (!mathQuery) return await sendTextMessage(senderPsid, "❌ Please provide a math problem!\nExample: /math 2x + 5 = 15");
+    await sendTextMessage(senderPsid, "🧮 Solving math problem accurately...");
+
+    try {
+      const mathRes = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: [
+            {
+              parts: [
+                { text: `You are an expert mathematician. Solve the following math problem accurately with clear step-by-step explanations in English: ${mathQuery}` }
+              ]
+            }
+          ]
+        }
+      );
+
+      const mathReply = mathRes.data.candidates[0].content.parts[0].text || "I couldn't solve this math problem.";
+      return await sendTextMessage(senderPsid, `🧮 **Math Solution:**\n\n${mathReply}`);
+    } catch (err) {
+      console.error('Math Solver Error:', err.response ? err.response.data : err.message);
+      return await sendTextMessage(senderPsid, "❌ An error occurred while solving the math problem. Please try again.");
+    }
+  }
+
+  // --- MUSIC PREVIEW ---
+  if (messageLower.startsWith('/play') || messageLower.startsWith('/music')) {
     const songQuery = text.replace(/\/play|\/music/, '').trim();
-    if (!songQuery) return await sendTextMessage(senderPsid, "Please provide a song title!");
-    await sendTextMessage(senderPsid, `Searching audio for "${songQuery}"...`);
+    if (!songQuery) return await sendTextMessage(senderPsid, "❌ Please provide a song title!\nExample: /play Panalangin");
+    await sendTextMessage(senderPsid, `🎵 Searching audio for "${songQuery}"...`);
     try {
       const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songQuery)}`);
       if (deezerRes.data && deezerRes.data.data.length > 0) {
         const track = deezerRes.data.data[0];
-        await sendTextMessage(senderPsid, `Playing preview: ${track.title} - ${track.artist.name}`);
+        await sendTextMessage(senderPsid, `🎶 Playing preview: ${track.title} - ${track.artist.name}`);
         return await sendMediaMessage(senderPsid, track.preview, 'audio');
       } else {
         return await sendTextMessage(senderPsid, `❌ Song not found.`);
       }
     } catch (err) {
-      return await sendTextMessage(senderPsid, "Error fetching music.");
+      return await sendTextMessage(senderPsid, "❌ Error fetching music.");
     }
   }
 
-  // --- GEMINI AI CHAT (UPDATED TO gemini-3.6-flash) ---
+  // --- GEMINI AI CHAT ---
   try {
     const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [
           {
