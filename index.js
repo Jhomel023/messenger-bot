@@ -38,10 +38,8 @@ app.post('/webhook', async (req, res) => {
         const userText = message.text ? message.text.trim() : '';
         const messageLower = userText.toLowerCase();
 
-        // Check if the user replied to an image with a command
         if (message.reply_to && message.reply_to.mid) {
           try {
-            // Fetch the original message that was replied to using Meta Graph API
             const repliedMsgRes = await axios.get(
               `https://graph.facebook.com/v18.0/${message.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
             );
@@ -54,7 +52,6 @@ app.post('/webhook', async (req, res) => {
 
                 await sendTextMessage(senderPsid, "Removing background, please wait...");
                 
-                // Here you can process or pass the imageUrl to a removebg API
                 await sendTextMessage(senderPsid, "Here is your processed image:");
                 return await sendMediaMessage(senderPsid, imageUrl, 'image');
               }
@@ -112,7 +109,7 @@ async function handleMessage(senderPsid, text) {
     }
   }
 
-  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>\n- Reply to any picture with /removebg`);
+  return await sendTextMessage(senderPsid, `Bot Commands:\n- /image <prompt>\n- /play <title>`);
 }
 
 async function sendTextMessage(senderPsid, text) {
