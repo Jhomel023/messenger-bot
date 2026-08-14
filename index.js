@@ -28,56 +28,36 @@ app.post('/webhook', (req, res) => {
         const ev = entry.messaging[0];
         const senderId = ev.sender.id;
         if (ev.message && !ev.message.is_echo) {
-          processIncomingMessage(senderId, ev.message);
+          const text = ev.message.text ? ev.message.text.trim() : '';
+          let imgUrl = null;
+          if (ev.message.attachments && ev.message.attachments[0]?.type === 'image') {
+            imgUrl = ev.message.attachments[0].payload.url;
+          }
+          handleMsg(senderId, text, imgUrl);
         }
       }
     });
   }
 });
 
-async function processIncomingMessage(senderId, messageObj) {
-  const text = messageObj.text ? messageObj.text.trim() : '';
-  let imgUrl = null;
-
-  // 1. Kung direktang may attachment ang current message
-  if (messageObj.attachments && messageObj.attachments[0]?.type === 'image') {
-    imgUrl = messageObj.attachments[0].payload.url;
-  }
-
-  // 2. Kung nag-reply ang user sa isang nakaraang mensahe (Kunin ang URL gamit ang Graph API)
-  if (!imgUrl && messageObj.reply_to && messageObj.reply_to.mid) {
-    try {
-      const res = await fetch(`https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`);
-      const data = await res.json();
-      if (data.attachments && data.attachments.data && data.attachments.data[0]?.type === 'image') {
-        imgUrl = data.attachments.data[0].payload.url;
-      }
-    } catch (err) {
-      console.error('Error fetching replied message:', err);
-    }
-  }
-
-  handleMsg(senderId, text, imgUrl);
-}
-
 async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song]\n🎨 /image [Prompt]\n✂️ /removebg (I-reply sa sinend na pic)\n🧠 [Tanong o Math]");
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song]\n🎨 /image [Prompt]\n✂️ /removebg (Mag-send ng pic kasama ang caption)\n🧠 [Tanong o Math]");
     return;
   }
 
   if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     if (!imgUrl) {
-      await sendText(senderId, "Pakisuyong i-reply ang /removebg doon sa mismong larawan na gusto mong tanggalan ng background.");
+      await sendText(senderId, "Mangyaring mag-attach ng larawan kasama ang caption na /removebg.");
       return;
     }
     if (!process.env.REMOVEBG_API_KEY) {
       await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
       return;
     }
-    await sendText(senderId, "Inaalis ang background ng larawan, sandali lang...");
+    await sendText(senderId, "Inaalis ang background...");
     try {
       const res = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
@@ -87,7 +67,7 @@ async function handleMsg(senderId, text, imgUrl) {
       if (res.ok) {
         await sendText(senderId, "Matagumpay na naalis ang background!");
       } else {
-        await sendText(senderId, "May suliranin sa remove.bg API key o credits.");
+        await sendText(senderId, "May error sa remove.bg API.");
       }
     } catch (e) {
       await sendText(senderId, "Nagka-error sa pagproseso.");
@@ -152,4 +132,3 @@ async function sendMedia(id, type, url) {
 }
 
 app.listen(PORT, () => console.log(`Running on port ${PORT}`));
-```[cite: 1]
