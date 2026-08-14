@@ -2,7 +2,6 @@
 
 const express = require('express');
 const bodyParser = require('body-parser');
-const request = require('request');
 
 const app = express();
 app.use(bodyParser.json());
@@ -50,7 +49,7 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-function sendMessage(recipientId, messageText) {
+async function sendMessage(recipientId, messageText) {
   if (messageText && messageText.length > 2000) {
     messageText = messageText.substring(0, 1997) + "...";
   }
@@ -60,20 +59,22 @@ function sendMessage(recipientId, messageText) {
     message: { text: messageText }
   };
 
-  request({
-    url: 'https://graph.facebook.com/v21.0/me/messages',
-    qs: { access_token: PAGE_ACCESS_TOKEN },
-    method: 'POST',
-    json: requestData
-  }, (error, response, body) => {
-    if (error) {
-      console.error('Error sending message: ', error);
-    } else if (body.error) {
-      console.error('Facebook API Error: ', body.error);
+  try {
+    const response = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestData)
+    });
+
+    const data = await response.json();
+    if (data.error) {
+      console.error('Facebook API Error: ', data.error);
     } else {
       console.log('Message sent successfully!');
     }
-  });
+  } catch (error) {
+    console.error('Error sending message: ', error);
+  }
 }
 
 app.listen(PORT, () => {
