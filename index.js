@@ -39,12 +39,10 @@ async function processIncomingMessage(senderId, messageObj) {
   const text = messageObj.text ? messageObj.text.trim() : '';
   let imgUrl = null;
 
-  // 1. Direktang may attachment (image) sa current message
   if (messageObj.attachments && messageObj.attachments[0]?.type === 'image') {
     imgUrl = messageObj.attachments[0].payload.url;
   }
 
-  // 2. Kung nag-reply sa isang mensahe (Gamit ang reply_to object ng Messenger API)
   if (!imgUrl && messageObj.reply_to && messageObj.reply_to.mid) {
     try {
       const graphRes = await fetch(`https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`);
@@ -58,9 +56,9 @@ async function processIncomingMessage(senderId, messageObj) {
     }
   }
 
-  // Kung ang command ay /removebg pero nag-attach ng pic o nag-reply sa pic
   const low = text.toLowerCase();
-  if (low.startsWith('/removebg') || low.startsWith('/bgremove') || (imgUrl && text === '')) {
+
+  if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     await handleRemoveBg(senderId, imgUrl);
     return;
   }
@@ -70,7 +68,7 @@ async function processIncomingMessage(senderId, messageObj) {
 
 async function handleRemoveBg(senderId, imgUrl) {
   if (!imgUrl) {
-    await sendText(senderId, "Mangyaring mag-attach ng larawan o i-reply ang /removebg sa mismong larawan.");
+    await sendText(senderId, "Mangyaring i-reply ang /removebg sa larawan o kaya i-attach ang larawan kasama ang caption na /removebg.");
     return;
   }
   if (!process.env.REMOVEBG_API_KEY) {
@@ -109,7 +107,7 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - I-reply o i-attach sa larawan para alisin ang background\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - Alisin ang background ng larawan\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
     return;
   }
 
@@ -143,12 +141,14 @@ async function handleMsg(senderId, text, imgUrl) {
   try {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text);
     const sys = isMath ? "Give ONLY the final answer and 1-sentence brief explanation." : "Be concise, direct, and friendly.";
+    
     const aiRes = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: `${sys}\n\nUser: ${text}`
     });
     await sendText(senderId, aiRes.text || "Walang na-generate na sagot.");
   } catch (e) {
+    console.error('Gemini AI Error:', e);
     await sendText(senderId, "Error sa AI response.");
   }
 }
