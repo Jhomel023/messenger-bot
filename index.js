@@ -28,61 +28,88 @@ app.post('/webhook', (req, res) => {
         const ev = entry.messaging[0];
         const senderId = ev.sender.id;
         if (ev.message && !ev.message.is_echo) {
-          const text = ev.message.text ? ev.message.text.trim() : '';
-          let imgUrl = null;
-          if (ev.message.attachments && ev.message.attachments[0]?.type === 'image') {
-            imgUrl = ev.message.attachments[0].payload.url;
-          }
-          handleMsg(senderId, text, imgUrl);
+          processIncomingMessage(senderId, ev.message);
         }
       }
     });
   }
 });
 
+async function processIncomingMessage(senderId, messageObj) {
+  const text = messageObj.text ? messageObj.text.trim() : '';
+  let imgUrl = null;
+
+  // 1. Direktang may attachment (image) sa current message
+  if (messageObj.attachments && messageObj.attachments[0]?.type === 'image') {
+    imgUrl = messageObj.attachments[0].payload.url;
+  }
+
+  // 2. Kung nag-reply sa isang mensahe (Gamit ang reply_to object ng Messenger API)
+  if (!imgUrl && messageObj.reply_to && messageObj.reply_to.mid) {
+    try {
+      const graphRes = await fetch(`https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`);
+      const data = await graphRes.json();
+      
+      if (data.attachments && data.attachments.data && data.attachments.data[0]?.type === 'image') {
+        imgUrl = data.attachments.data[0].payload.url;
+      }
+    } catch (err) {
+      console.error('Error sa pagkuha ng nireplyan na pic:', err);
+    }
+  }
+
+  // Kung ang command ay /removebg pero nag-attach ng pic o nag-reply sa pic
+  const low = text.toLowerCase();
+  if (low.startsWith('/removebg') || low.startsWith('/bgremove') || (imgUrl && text === '')) {
+    await handleRemoveBg(senderId, imgUrl);
+    return;
+  }
+
+  handleMsg(senderId, text, imgUrl);
+}
+
+async function handleRemoveBg(senderId, imgUrl) {
+  if (!imgUrl) {
+    await sendText(senderId, "Mangyaring mag-attach ng larawan o i-reply ang /removebg sa mismong larawan.");
+    return;
+  }
+  if (!process.env.REMOVEBG_API_KEY) {
+    await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
+    return;
+  }
+  await sendText(senderId, "Tinatanggal ang background...");
+  try {
+    const res = await fetch('https://api.remove.bg/v1.0/removebg', {
+      method: 'POST',
+      headers: { 
+        'X-Api-Key': process.env.REMOVEBG_API_KEY, 
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({ 
+        image_url: imgUrl, 
+        size: 'auto' 
+      })
+    });
+
+    if (res.ok) {
+      const arrayBuffer = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      await sendImageBuffer(senderId, buffer);
+    } else {
+      const errJson = await res.json();
+      await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
+    }
+  } catch (e) {
+    console.error('Removebg Error:', e);
+    await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
+  }
+}
+
 async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - Alisin ang background ng larawan (Mag-attach ng pic)\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
-    return;
-  }
-
-  if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
-    if (!imgUrl) {
-      await sendText(senderId, "Mangyaring mag-attach ng larawan kasama ang caption na /removebg.");
-      return;
-    }
-    if (!process.env.REMOVEBG_API_KEY) {
-      await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
-      return;
-    }
-    await sendText(senderId, "Tinatanggal ang background gamit ang iyong remove.bg API...");
-    try {
-      const res = await fetch('https://api.remove.bg/v1.0/removebg', {
-        method: 'POST',
-        headers: { 
-          'X-Api-Key': process.env.REMOVEBG_API_KEY, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ 
-          image_url: imgUrl, 
-          size: 'auto' 
-        })
-      });
-
-      if (res.ok) {
-        const arrayBuffer = await res.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        await sendImageBuffer(senderId, buffer);
-      } else {
-        const errJson = await res.json();
-        await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
-      }
-    } catch (e) {
-      console.error(e);
-      await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
-    }
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - I-reply o i-attach sa larawan para alisin ang background\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
     return;
   }
 
