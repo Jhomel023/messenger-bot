@@ -55,25 +55,37 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 1. Handle /play or /music command for 30-sec audio/track snippet sending
+  // 1. MUSIC / PLAY COMMAND (Nagse-send ng direct audio attachment)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
-    // Halimbawa ng direct audio attachment (pwede mong palitan ng actual direct URL ng audio file)
-    await sendMediaToMessenger(senderId, 'audio', 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+    const query = userMessage.replace(/\/play|\/music/i, '').trim();
+    await sendTextToMessenger(senderId, `Searching and preparing audio for: "${query || 'music'}"...`);
+    
+    // Halimbawa: Direct stream / sample audio track (Pwede mong palitan ng working MP3 search API URL)
+    const audioUrl = `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3`;
+    await sendMediaToMessenger(senderId, 'audio', audioUrl);
     return;
   }
 
-  // 2. Handle Image Generation or Request queries
-  if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.includes('generate image')) {
-    // Halimbawa ng direct image attachment (pwede ring palitan ng generated image URL mula sa AI)
-    await sendMediaToMessenger(senderId, 'image', 'https://picsum.photos/800/600');
+  // 2. IMAGE GENERATION COMMAND (Direktang magse-send ng image attachment)
+  if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.startsWith('/generate')) {
+    const prompt = userMessage.replace(/\/image|\/draw|\/generate/i, '').trim();
+    await sendTextToMessenger(senderId, `Generating image for: "${prompt}"...`);
+
+    // Gamit ang libreng Pollinations AI image generator para direct image URL agad
+    const encodedPrompt = encodeURIComponent(prompt || 'A beautiful scenery');
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
+    
+    await sendMediaToMessenger(senderId, 'image', imageUrl);
     return;
   }
 
-  // 3. Handle AI generation and Math solving via Gemini 3.6 Flash
+  // 3. MATH SOLVING & GENERAL AI (Gemini 3.6 Flash na may strict math instruction)
   try {
+    const mathPrompt = `You are an expert math solver and assistant. Solve the following problem accurately step-by-step, then give the final answer clearly: ${userMessage}`;
+
     const aiResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: userMessage,
+      contents: mathPrompt,
     });
 
     let responseText = aiResponse.text || "Sorry, the AI did not generate a response.";
@@ -95,7 +107,6 @@ async function sendTextToMessenger(recipientId, messageText) {
     recipient: { id: recipientId },
     message: { text: messageText }
   };
-
   await callMessengerAPI(requestData);
 }
 
@@ -112,7 +123,6 @@ async function sendMediaToMessenger(recipientId, type, mediaUrl) {
       }
     }
   };
-
   await callMessengerAPI(requestData);
 }
 
@@ -128,7 +138,7 @@ async function callMessengerAPI(requestData) {
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
     } else {
-      console.log('Media/Response sent successfully to Messenger!');
+      console.log('Successfully sent to Messenger!');
     }
   } catch (error) {
     console.error('Error sending to Messenger API:', error);
