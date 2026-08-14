@@ -57,15 +57,8 @@ async function handleMsg(senderId, text, imgUrl) {
       await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
       return;
     }
-    await sendText(senderId, "Kasalukuyang tinatanggal ang background...");
+    await sendText(senderId, "Tinatanggal ang background gamit ang iyong remove.bg API...");
     try {
-      // 1. I-download muna ang image mula kay FB gamit ang token para hindi ma-block
-      const imgFetch = await fetch(imgUrl);
-      const arrayBuffer = await imgFetch.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const base64Image = buffer.toString('base64');
-
-      // 2. I pasa sa remove.bg gamit ang file base64 sa halip na url
       const res = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
         headers: { 
@@ -73,15 +66,15 @@ async function handleMsg(senderId, text, imgUrl) {
           'Content-Type': 'application/json' 
         },
         body: JSON.stringify({ 
-          image_file_b64: base64Image, 
+          image_url: imgUrl, 
           size: 'auto' 
         })
       });
 
       if (res.ok) {
-        const resultBuffer = await res.arrayBuffer();
-        // Dito natin isesend pabalik ang tinanggalan ng background bilang file attachment
-        await sendImageBuffer(senderId, Buffer.from(resultBuffer));
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        await sendImageBuffer(senderId, buffer);
       } else {
         const errJson = await res.json();
         await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
@@ -150,7 +143,6 @@ async function sendMedia(id, type, url) {
 }
 
 async function sendImageBuffer(id, buffer) {
-  // Paggamit ng multipart/form-data para maibalik ang PNG file na tinanggalan ng background kay user
   const formData = new FormData();
   formData.append('recipient', JSON.stringify({ id }));
   formData.append('message', JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }));
