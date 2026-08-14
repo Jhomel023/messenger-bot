@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// Dito nilagay nang direkta ang apiKey mula sa environment variable
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.get('/webhook', (req, res) => {
@@ -42,7 +41,7 @@ app.post('/webhook', (req, res) => {
 
         if (webhookEvent.message && webhookEvent.message.text && !webhookEvent.message.is_echo) {
           const receivedMessageText = webhookEvent.message.text;
-          console.log(`Natanggap mula kay ${senderId}: ${receivedMessageText}`);
+          console.log(`Received message from ${senderId}: ${receivedMessageText}`);
 
           handleAiResponse(senderId, receivedMessageText);
         }
@@ -55,12 +54,13 @@ app.post('/webhook', (req, res) => {
 
 async function handleAiResponse(senderId, userMessage) {
   try {
+    // Updated to a supported model
     const aiResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       contents: userMessage,
     });
 
-    let responseText = aiResponse.text || "Pasensya na, walang na-generate na sagot ang AI.";
+    let responseText = aiResponse.text || "Sorry, the AI did not generate a response.";
 
     if (responseText.length > 2000) {
       responseText = responseText.substring(0, 1997) + "...";
@@ -69,8 +69,8 @@ async function handleAiResponse(senderId, userMessage) {
     await sendToMessenger(senderId, responseText);
 
   } catch (error) {
-    console.error('Error sa Gemini AI:', error);
-    await sendToMessenger(senderId, "May error sa pagproseso ng AI.");
+    console.error('Error with Gemini AI:', error);
+    await sendToMessenger(senderId, "An error occurred while processing your AI request.");
   }
 }
 
@@ -91,10 +91,10 @@ async function sendToMessenger(recipientId, messageText) {
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
     } else {
-      console.log('Naipadala na ang AI response!');
+      console.log('AI response sent successfully!');
     }
   } catch (error) {
-    console.error('Error sa pag-send sa Messenger:', error);
+    console.error('Error sending to Messenger API:', error);
   }
 }
 
