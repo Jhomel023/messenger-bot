@@ -54,9 +54,8 @@ app.post('/webhook', (req, res) => {
 
 async function handleAiResponse(senderId, userMessage) {
   try {
-    // Updated to a supported model
     const aiResponse = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       contents: userMessage,
     });
 
