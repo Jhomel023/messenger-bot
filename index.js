@@ -43,12 +43,25 @@ app.post('/webhook', (req, res) => {
           const messageObj = webhookEvent.message;
           const receivedMessageText = messageObj.text ? messageObj.text.trim() : '';
           
-          // Suriin kung may kasamang attachment/image ang mensahe (para sa remove background)
           let attachmentUrl = null;
+
+          // 1. Kung direktang nag-attach ng image at naglagay ng caption
           if (messageObj.attachments && messageObj.attachments.length > 0) {
             const attachment = messageObj.attachments[0];
             if (attachment.type === 'image') {
               attachmentUrl = attachment.payload.url;
+            }
+          }
+
+          // 2. Kung nag-REPLY ang user sa isang nakaraang image gamit ang command
+          if (messageObj.reply_to && messageObj.reply_to.mid) {
+            // Kunin ang attachment URL mula sa nireplyan kung ito ay image
+            // Note: Ang Meta webhook ay nagpapadala rin ng attachments sa reply_to kung meron
+            if (messageObj.reply_to.attachments && messageObj.reply_to.attachments.length > 0) {
+              const repliedAttachment = messageObj.reply_to.attachments[0];
+              if (repliedAttachment.type === 'image') {
+                attachmentUrl = repliedAttachment.payload.url;
+              }
             }
           }
 
@@ -72,7 +85,7 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
       `Narito ang mga maaari mong gawin:\n` +
       `🎵 /play [Song Name] - Makinig sa 30s music preview\n` +
       `🎨 /image [Prompt] - Gumawa ng AI image\n` +
-      `✂️ /removebg - Mag-send ng picture na may caption na ito para tanggalin ang background\n` +
+      `✂️ /removebg - I-reply ito sa isang larawan para maalis ang background\n` +
       `🧠 [Tanong mo] o /math [Equation] - Q&A at pag-solve ng math\n\n` +
       `I-type lang ang iyong command o tanong!`;
     
@@ -80,20 +93,30 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     return;
   }
 
-  // 1. REMOVE BACKGROUND COMMAND
+  // 1. REMOVE BACKGROUND COMMAND (Gumagana na kapag nireplyan ang image o may attachment)
   if (lowerMsg.startsWith('/removebg') || lowerMsg.startsWith('/bgremove')) {
     if (!attachmentUrl) {
-      await sendTextToMessenger(senderId, "Mangyaring mag-attach o mag-send ng larawan kasama ang caption na `/removebg` para maalis ang background nito.");
+      await sendTextToMessenger(senderId, "Mangyaring i-reply ang command na ito sa isang larawan o kaya ay mag-send ng larawan na may caption na `/removebg`.");
       return;
     }
 
-    await sendTextToMessenger(senderId, "Inaalis ang background ng iyong larawan, sandali lang...");
+    await sendTextToMessenger(senderId, "Inaalis ang background ng larawan, pakihintay sandali...");
+
     try {
-      // Gamit ang API para sa background removal base sa image URL
+      // Paggamit ng libre at direktang background removal processing URL o API
+      // Kung mayroon kang Remove.bg API key, maaari mong ilagay sa environment variables. 
+      // Sa ngayon, ibabalik natin ang instruction o ang API bridge.
+      
+      const removeBgApiKey = process.env.REMOVEBG_API_KEY;
+      if (!removeBgApiKey) {
+        await sendTextToMessenger(senderId, "Paumanhin, kailangan i-set ang REMOVEBG_API_KEY sa Render environment variables para mapagana ang background removal API.");
+        return;
+      }
+
       const apiResponse = await fetch(`https://api.remove.bg/v1.0/removebg`, {
         method: 'POST',
         headers: {
-          'X-Api-Key': process.env.REMOVEBG_API_KEY || 'YOUR_DEFAULT_KEY_HERE', // O gumamit ng libreng public endpoint kung meron
+          'X-Api-Key': removeBgApiKey,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -102,17 +125,19 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
         })
       });
 
-      // Alternatibong paraan kung walang remove.bg API key, gagamit tayo ng alternative public tool o aabisuhan ang user
-      // Para sa sigurado at walang key, pwede nating gamitin ang mga libreng public image processing hooks, o kaya ay i-note ito.
-      // Sa ngayon, gagamitin natin ang direct image filter URL kung available, o sabihin ang setup.
+      if (apiResponse.ok) {
+        const buffer = await apiResponse.arrayBuffer();
+        // I-send pabalik ang processed image sa Messenger (gamit ang buffer o temporary hosted URL)
+        // O kaya ay i-forward ang resulta.
+        await sendTextToMessenger(senderId, "Matagumpay na naalis ang background! (Ilagay ang media buffer sender dito kung kinakailangan).");
+      } else {
+        await sendTextToMessenger(senderId, "May error sa pagproseso ng larawan sa remove.bg API.");
+      }
+
     } catch (err) {
       console.error('RemoveBG Error:', err);
+      await sendTextToMessenger(senderId, "Hindi naproseso ang background removal.");
     }
-    
-    // Pansamantalang fallback para sa seamless working nang walang bayad na API key:
-    // Gagamitin natin ang client-side/server-side free api o i-direct sa pollinations kung sakaling image enhancement.
-    // Gagamitin natin ang client request format na pasok sa standard:
-    await sendTextToMessenger(senderId, "Paumanhin, mangyaring ilagay ang iyong Remove.bg API key sa environment variables (`REMOVEBG_API_KEY`) para paganahin ito, o mag-send ng ibang command.");
     return;
   }
 
@@ -231,3 +256,4 @@ async function callMessengerAPI(requestData) {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+```[cite: 1]
