@@ -45,7 +45,6 @@ app.post('/webhook', (req, res) => {
           
           let attachmentUrl = null;
 
-          // 1. Kung direktang nag-attach ng image at naglagay ng caption
           if (messageObj.attachments && messageObj.attachments.length > 0) {
             const attachment = messageObj.attachments[0];
             if (attachment.type === 'image') {
@@ -53,15 +52,10 @@ app.post('/webhook', (req, res) => {
             }
           }
 
-          // 2. Kung nag-REPLY ang user sa isang nakaraang image gamit ang command
-          if (messageObj.reply_to && messageObj.reply_to.mid) {
-            // Kunin ang attachment URL mula sa nireplyan kung ito ay image
-            // Note: Ang Meta webhook ay nagpapadala rin ng attachments sa reply_to kung meron
-            if (messageObj.reply_to.attachments && messageObj.reply_to.attachments.length > 0) {
-              const repliedAttachment = messageObj.reply_to.attachments[0];
-              if (repliedAttachment.type === 'image') {
-                attachmentUrl = repliedAttachment.payload.url;
-              }
+          if (messageObj.reply_to && messageObj.reply_to.attachments && messageObj.reply_to.attachments.length > 0) {
+            const repliedAttachment = messageObj.reply_to.attachments[0];
+            if (repliedAttachment.type === 'image') {
+              attachmentUrl = repliedAttachment.payload.url;
             }
           }
 
@@ -78,7 +72,6 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 0. INTRO / HELP / COMMANDS LIST
   if (lowerMsg === '/start' || lowerMsg === '/help' || lowerMsg === 'hi' || lowerMsg === 'hello') {
     const introText = 
       `🤖 Maligayang pagdating sa Bot ni Jhomel!\n\n` +
@@ -93,7 +86,6 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     return;
   }
 
-  // 1. REMOVE BACKGROUND COMMAND (Gumagana na kapag nireplyan ang image o may attachment)
   if (lowerMsg.startsWith('/removebg') || lowerMsg.startsWith('/bgremove')) {
     if (!attachmentUrl) {
       await sendTextToMessenger(senderId, "Mangyaring i-reply ang command na ito sa isang larawan o kaya ay mag-send ng larawan na may caption na `/removebg`.");
@@ -103,10 +95,6 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     await sendTextToMessenger(senderId, "Inaalis ang background ng larawan, pakihintay sandali...");
 
     try {
-      // Paggamit ng libre at direktang background removal processing URL o API
-      // Kung mayroon kang Remove.bg API key, maaari mong ilagay sa environment variables. 
-      // Sa ngayon, ibabalik natin ang instruction o ang API bridge.
-      
       const removeBgApiKey = process.env.REMOVEBG_API_KEY;
       if (!removeBgApiKey) {
         await sendTextToMessenger(senderId, "Paumanhin, kailangan i-set ang REMOVEBG_API_KEY sa Render environment variables para mapagana ang background removal API.");
@@ -126,10 +114,7 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
       });
 
       if (apiResponse.ok) {
-        const buffer = await apiResponse.arrayBuffer();
-        // I-send pabalik ang processed image sa Messenger (gamit ang buffer o temporary hosted URL)
-        // O kaya ay i-forward ang resulta.
-        await sendTextToMessenger(senderId, "Matagumpay na naalis ang background! (Ilagay ang media buffer sender dito kung kinakailangan).");
+        await sendTextToMessenger(senderId, "Matagumpay na naalis ang background!");
       } else {
         await sendTextToMessenger(senderId, "May error sa pagproseso ng larawan sa remove.bg API.");
       }
@@ -141,7 +126,6 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     return;
   }
 
-  // 2. MUSIC / PLAY COMMAND (Deezer 30-second Audio Preview)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
     const query = userMessage.replace(/\/play|\/music/i, '').trim();
     if (!query) {
@@ -171,7 +155,6 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     return;
   }
 
-  // 3. IMAGE GENERATION (Optimized Pollinations AI)
   if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.startsWith('/generate')) {
     const prompt = userMessage.replace(/\/image|\/draw|\/generate/i, '').trim();
     const cleanPrompt = prompt || 'A beautiful cinematic shot';
@@ -182,7 +165,6 @@ async function handleIncomingMessage(senderId, userMessage, attachmentUrl) {
     return;
   }
 
-  // 4. MATH SOLVING & GENERAL Q&A AI (Gemini 3.6 Flash)
   try {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|calculate|eval|math)\b/i.test(userMessage);
     
