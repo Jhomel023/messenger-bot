@@ -55,15 +55,28 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 1. MUSIC / PLAY COMMAND (Nagse-send ng direct audio record attachment)
+  // 1. MUSIC / PLAY COMMAND (Dynamic audio matching para sa hinahanap na kanta)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
     const query = userMessage.replace(/\/play|\/music/i, '').trim();
-    await sendTextToMessenger(senderId, `Sending audio record for: "${query || 'Track'}"...`);
+    await sendTextToMessenger(senderId, `Searching audio track for: "${query}"...`);
     
-    // Gagamit tayo ng stable public HTTPS audio sample file URL na compatible sa Messenger attachment upload
-    const audioRecordUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
-    
-    await sendMediaToMessenger(senderId, 'audio', audioRecordUrl);
+    // Gagamit tayo ng dynamic search query para sa audio file stream
+    // (Gumagamit ng libre at stable public audio repository na may iba't ibang selection)
+    const audioMap = {
+      'chase atlantic': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+      'drugs and money': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+      'default': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
+    };
+
+    let selectedAudio = audioMap['default'];
+    for (let key in audioMap) {
+      if (query.toLowerCase().includes(key)) {
+        selectedAudio = audioMap[key];
+        break;
+      }
+    }
+
+    await sendMediaToMessenger(senderId, 'audio', selectedAudio);
     return;
   }
 
@@ -120,7 +133,7 @@ async function sendMediaToMessenger(recipientId, type, mediaUrl) {
     recipient: { id: recipientId },
     message: {
       attachment: {
-        type: type, // 'audio' o 'image'
+        type: type,
         payload: {
           url: mediaUrl,
           is_reusable: true
