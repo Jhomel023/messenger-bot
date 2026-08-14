@@ -30,12 +30,14 @@ app.post('/webhook', (req, res) => {
         if (ev.message && !ev.message.is_echo) {
           const text = ev.message.text ? ev.message.text.trim() : '';
           let imgUrl = null;
+          
           if (ev.message.attachments && ev.message.attachments[0]?.type === 'image') {
             imgUrl = ev.message.attachments[0].payload.url;
           }
           if (ev.message.reply_to?.attachments?.[0]?.type === 'image') {
             imgUrl = ev.message.reply_to.attachments[0].payload.url;
           }
+          
           handleMsg(senderId, text, imgUrl);
         }
       }
@@ -47,13 +49,13 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song]\n🎨 /image [Prompt]\n✂️ /removebg (Reply sa pic)\n🧠 [Tanong o Math]");
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song]\n🎨 /image [Prompt]\n✂️ /removebg (I-reply sa pic)\n🧠 [Tanong o Math]");
     return;
   }
 
   if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     if (!imgUrl) {
-      await sendText(senderId, "Mag-reply sa larawan o mag-attach ng pic kasama ang /removebg.");
+      await sendText(senderId, "Pakisuyong i-reply ang /removebg sa larawan na gusto mong tanggalan ng background.");
       return;
     }
     if (!process.env.REMOVEBG_API_KEY) {
@@ -67,8 +69,11 @@ async function handleMsg(senderId, text, imgUrl) {
         headers: { 'X-Api-Key': process.env.REMOVEBG_API_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_url: imgUrl, size: 'auto' })
       });
-      if (res.ok) await sendText(senderId, "Tagumpay na naalis ang background!");
-      else await sendText(senderId, "May error sa remove.bg API.");
+      if (res.ok) {
+        await sendText(senderId, "Tagumpay na naalis ang background!");
+      } else {
+        await sendText(senderId, "May error sa remove.bg API key o limit.");
+      }
     } catch (e) {
       await sendText(senderId, "Nagka-error sa pagproseso.");
     }
