@@ -55,32 +55,37 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 1. MUSIC / PLAY COMMAND (Dynamic audio matching para sa hinahanap na kanta)
+  // 1. MUSIC / PLAY COMMAND (Deezer 30-second Audio Preview)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
     const query = userMessage.replace(/\/play|\/music/i, '').trim();
-    await sendTextToMessenger(senderId, `Searching audio track for: "${query}"...`);
-    
-    // Gagamit tayo ng dynamic search query para sa audio file stream
-    // (Gumagamit ng libre at stable public audio repository na may iba't ibang selection)
-    const audioMap = {
-      'chase atlantic': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-      'drugs and money': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
-      'default': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
-    };
-
-    let selectedAudio = audioMap['default'];
-    for (let key in audioMap) {
-      if (query.toLowerCase().includes(key)) {
-        selectedAudio = audioMap[key];
-        break;
-      }
+    if (!query) {
+      await sendTextToMessenger(senderId, "Please provide a song name. Example: /play Chase Atlantic");
+      return;
     }
 
-    await sendMediaToMessenger(senderId, 'audio', selectedAudio);
+    await sendTextToMessenger(senderId, `Searching track for: "${query}"...`);
+
+    try {
+      const deezerRes = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=1`);
+      const deezerData = await deezerRes.json();
+
+      if (deezerData.data && deezerData.data.length > 0) {
+        const track = deezerData.data[0];
+        const previewUrl = track.preview; // 30-second MP3 preview link
+
+        await sendTextToMessenger(senderId, `Now playing: ${track.title} by ${track.artist.name}`);
+        await sendMediaToMessenger(senderId, 'audio', previewUrl);
+      } else {
+        await sendTextToMessenger(senderId, "Sorry, no matching track found.");
+      }
+    } catch (err) {
+      console.error('Music Search Error:', err);
+      await sendTextToMessenger(senderId, "An error occurred while fetching the track.");
+    }
     return;
   }
 
-  // 2. IMAGE GENERATION (Naka-lock at hindi ginalaw)
+  // 2. IMAGE GENERATION (Naka-lock)
   if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.startsWith('/generate')) {
     const prompt = userMessage.replace(/\/image|\/draw|\/generate/i, '').trim();
     const encodedPrompt = encodeURIComponent(prompt || 'A beautiful scenery');
@@ -90,7 +95,7 @@ async function handleIncomingMessage(senderId, userMessage) {
     return;
   }
 
-  // 3. MATH SOLVING & GENERAL AI (Maikli at direkta ang sagot)
+  // 3. MATH SOLVING & GENERAL AI (Gemini 3.6 Flash - Maikli at direkta)
   try {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|calculate|eval|math)\b/i.test(userMessage);
     
