@@ -53,13 +53,23 @@ app.post('/webhook', (req, res) => {
 });
 
 async function handleIncomingMessage(senderId, userMessage) {
-  // Handle /play or /music commands (audio / record snippet logic)
-  if (userMessage.toLowerCase().startsWith('/play') || userMessage.toLowerCase().startsWith('/music')) {
-    await sendToMessenger(senderId, "Playing your requested track / sending audio record snippet...");
+  const lowerMsg = userMessage.toLowerCase();
+
+  // 1. Handle /play or /music command for 30-sec audio/track snippet sending
+  if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
+    // Halimbawa ng direct audio attachment (pwede mong palitan ng actual direct URL ng audio file)
+    await sendMediaToMessenger(senderId, 'audio', 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
     return;
   }
 
-  // Handle AI generation, math solving, and other requests
+  // 2. Handle Image Generation or Request queries
+  if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.includes('generate image')) {
+    // Halimbawa ng direct image attachment (pwede ring palitan ng generated image URL mula sa AI)
+    await sendMediaToMessenger(senderId, 'image', 'https://picsum.photos/800/600');
+    return;
+  }
+
+  // 3. Handle AI generation and Math solving via Gemini 3.6 Flash
   try {
     const aiResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
@@ -72,20 +82,41 @@ async function handleIncomingMessage(senderId, userMessage) {
       responseText = responseText.substring(0, 1997) + "...";
     }
 
-    await sendToMessenger(senderId, responseText);
+    await sendTextToMessenger(senderId, responseText);
 
   } catch (error) {
     console.error('Error with Gemini AI:', error);
-    await sendToMessenger(senderId, "An error occurred while processing your request.");
+    await sendTextToMessenger(senderId, "An error occurred while processing your request.");
   }
 }
 
-async function sendToMessenger(recipientId, messageText) {
+async function sendTextToMessenger(recipientId, messageText) {
   const requestData = {
     recipient: { id: recipientId },
     message: { text: messageText }
   };
 
+  await callMessengerAPI(requestData);
+}
+
+async function sendMediaToMessenger(recipientId, type, mediaUrl) {
+  const requestData = {
+    recipient: { id: recipientId },
+    message: {
+      attachment: {
+        type: type, // 'image' o 'audio'
+        payload: {
+          url: mediaUrl,
+          is_reusable: true
+        }
+      }
+    }
+  };
+
+  await callMessengerAPI(requestData);
+}
+
+async function callMessengerAPI(requestData) {
   try {
     const response = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
       method: 'POST',
@@ -97,7 +128,7 @@ async function sendToMessenger(recipientId, messageText) {
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
     } else {
-      console.log('Response sent successfully!');
+      console.log('Media/Response sent successfully to Messenger!');
     }
   } catch (error) {
     console.error('Error sending to Messenger API:', error);
