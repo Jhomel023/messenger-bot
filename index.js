@@ -208,7 +208,7 @@ async function handleMessage(senderPsid, text, messageLower) {
 async function sendTextMessage(senderPsid, text) {
   try {
     await axios.post(
-      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      `https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
         recipient: { id: senderPsid },
         message: { text: text }
@@ -222,7 +222,7 @@ async function sendTextMessage(senderPsid, text) {
 async function sendMediaMessage(senderPsid, url, type) {
   try {
     await axios.post(
-      `https://graph.facebook.com/v18.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      `https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
       {
         recipient: {
           id: senderPsid
