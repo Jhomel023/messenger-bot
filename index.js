@@ -31,13 +31,10 @@ app.post('/webhook', (req, res) => {
           const text = ev.message.text ? ev.message.text.trim() : '';
           let imgUrl = null;
           
-          // 1. Direct attachment (kapag sabay sinend o standalone image)
           if (ev.message.attachments && ev.message.attachments[0]?.type === 'image') {
             imgUrl = ev.message.attachments[0].payload.url;
           }
           
-          // 2. Replied attachment (kapag nag-reply sa lumang pic)
-          // Sinusuri ang iba't ibang posibleng pormat ng reply payload mula sa Meta API
           if (ev.message.reply_to) {
             const reply = ev.message.reply_to;
             if (reply.attachments && reply.attachments[0]?.type === 'image') {
@@ -62,14 +59,14 @@ async function handleMsg(senderId, text, imgUrl) {
 
   if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     if (!imgUrl) {
-      await sendText(senderId, "Uy, hindi nabaon o nabasa ang larawan sa reply mo. Subukang i-send ulit ang picture nang diretso na may caption na /removebg.");
+      await sendText(senderId, "Mangyaring i-reply ang /removebg sa larawan na nais mong tanggalan ng background.");
       return;
     }
     if (!process.env.REMOVEBG_API_KEY) {
-      await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
+      await sendText(senderId, "Mangyaring itakda ang REMOVEBG_API_KEY sa mga environment variable ng Render.");
       return;
     }
-    await sendText(senderId, "Inaalis ang background, sandali lang...");
+    await sendText(senderId, "Kasalukuyang tinatanggal ang background ng larawan...");
     try {
       const res = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
@@ -77,15 +74,12 @@ async function handleMsg(senderId, text, imgUrl) {
         body: JSON.stringify({ image_url: imgUrl, size: 'auto' })
       });
       if (res.ok) {
-        const buffer = await res.arrayBuffer();
-        // Dito natin isusunod ang pagpasa pabalik ng buffer sakaling kailanganin ang raw file, 
-        // sa ngayon status muna ang ipapadala para matiyak na pumasok ang API call.
-        await sendText(senderId, "Tagumpay na naalis ang background ng larawan!");
+        await sendText(senderId, "Matagumpay na naalis ang background ng larawan.");
       } else {
-        await sendText(senderId, "May error sa remove.bg API key o naubos na ang credits.");
+        await sendText(senderId, "Nagkaroon ng suliranin sa pagproseso gamit ang remove.bg API.");
       }
     } catch (e) {
-      await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
+      await sendText(senderId, "Nagka-error sa operasyon ng background removal.");
     }
     return;
   }
@@ -93,7 +87,7 @@ async function handleMsg(senderId, text, imgUrl) {
   if (low.startsWith('/play') || low.startsWith('/music')) {
     const q = text.replace(/\/play|\/music/i, '').trim();
     if (!q) {
-      await sendText(senderId, "Maglagay ng kanta. Halimbawa: /play Chase Atlantic");
+      await sendText(senderId, "Maglagay ng pamagat ng kanta. Halimbawa: /play Chase Atlantic");
       return;
     }
     try {
@@ -103,10 +97,10 @@ async function handleMsg(senderId, text, imgUrl) {
         await sendText(senderId, `Now playing: ${d.data[0].title} by ${d.data[0].artist.name}`);
         await sendMedia(senderId, 'audio', d.data[0].preview);
       } else {
-        await sendText(senderId, "Walang nakitang kanta.");
+        await sendText(senderId, "Walang nahanap na kanta.");
       }
     } catch (e) {
-      await sendText(senderId, "Error sa paghanap ng kanta.");
+      await sendText(senderId, "Error sa paghanap ng musika.");
     }
     return;
   }
@@ -126,7 +120,7 @@ async function handleMsg(senderId, text, imgUrl) {
     });
     await sendText(senderId, aiRes.text || "Walang na-generate na sagot.");
   } catch (e) {
-    await sendText(senderId, "Error sa AI response.");
+    await sendText(senderId, "Error sa pagtugon ng AI.");
   }
 }
 
@@ -147,4 +141,3 @@ async function sendMedia(id, type, url) {
 }
 
 app.listen(PORT, () => console.log(`Running on port ${PORT}`));
-```[cite: 1]
