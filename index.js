@@ -2,6 +2,7 @@
 
 const express = require('express');
 const bodyParser = require('body-parser');
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(bodyParser.json());
@@ -9,6 +10,8 @@ app.use(bodyParser.json());
 const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+const ai = new GoogleGenAI();
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -38,10 +41,9 @@ app.post('/webhook', (req, res) => {
 
         if (webhookEvent.message && webhookEvent.message.text && !webhookEvent.message.is_echo) {
           const receivedMessageText = webhookEvent.message.text;
-          console.log(`Natanggap: ${receivedMessageText}`);
+          console.log(`Natanggap mula kay ${senderId}: ${receivedMessageText}`);
 
-          // Dito pwedeng ilagay ang reply ng bot
-          sendMessage(senderId, "Hello! Natanggap ko ang mensahe mo.");
+          handleAiResponse(senderId, receivedMessageText);
         }
       }
     });
@@ -50,11 +52,28 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-async function sendMessage(recipientId, messageText) {
-  if (messageText && messageText.length > 2000) {
-    messageText = messageText.substring(0, 1997) + "...";
-  }
+async function handleAiResponse(senderId, userMessage) {
+  try {
+    const aiResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: userMessage,
+    });
 
+    let responseText = aiResponse.text || "Pasensya na, walang na-generate na sagot ang AI.";
+
+    if (responseText.length > 2000) {
+      responseText = responseText.substring(0, 1997) + "...";
+    }
+
+    await sendToMessenger(senderId, responseText);
+
+  } catch (error) {
+    console.error('Error sa Gemini AI:', error);
+    await sendToMessenger(senderId, "May error sa pagproseso ng AI.");
+  }
+}
+
+async function sendToMessenger(recipientId, messageText) {
   const requestData = {
     recipient: { id: recipientId },
     message: { text: messageText }
@@ -71,10 +90,10 @@ async function sendMessage(recipientId, messageText) {
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
     } else {
-      console.log('Naipadala ang mensahe!');
+      console.log('Naipadala na ang AI response!');
     }
   } catch (error) {
-    console.error('Error sa pag-send:', error);
+    console.error('Error sa pag-send sa Messenger:', error);
   }
 }
 
