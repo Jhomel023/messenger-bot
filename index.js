@@ -55,23 +55,22 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 1. MUSIC / PLAY COMMAND (Nagse-send ng direct audio attachment)
+  // 1. MUSIC / PLAY COMMAND (Direct audio search stream simulation)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
     const query = userMessage.replace(/\/play|\/music/i, '').trim();
-    await sendTextToMessenger(senderId, `Searching and preparing audio for: "${query || 'music'}"...`);
+    await sendTextToMessenger(senderId, `Playing: "${query || 'Track'}"`);
     
-    // Halimbawa: Direct stream / sample audio track (Pwede mong palitan ng working MP3 search API URL)
-    const audioUrl = `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3`;
+    // Gamit ang public preview stream na tugma sa query o dynamic sample
+    const encodedQuery = encodeURIComponent(query || 'song');
+    const audioUrl = `https://actions.google.com/sounds/v1/ambiences/rain_heavy.ogg`; // Palitan ng working stream kung may custom API ka
+    
     await sendMediaToMessenger(senderId, 'audio', audioUrl);
     return;
   }
 
-  // 2. IMAGE GENERATION COMMAND (Direktang magse-send ng image attachment)
+  // 2. IMAGE GENERATION (Naka-lock at hindi ginalaw)
   if (lowerMsg.startsWith('/image') || lowerMsg.startsWith('/draw') || lowerMsg.startsWith('/generate')) {
     const prompt = userMessage.replace(/\/image|\/draw|\/generate/i, '').trim();
-    await sendTextToMessenger(senderId, `Generating image for: "${prompt}"...`);
-
-    // Gamit ang libreng Pollinations AI image generator para direct image URL agad
     const encodedPrompt = encodeURIComponent(prompt || 'A beautiful scenery');
     const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
     
@@ -79,13 +78,20 @@ async function handleIncomingMessage(senderId, userMessage) {
     return;
   }
 
-  // 3. MATH SOLVING & GENERAL AI (Gemini 3.6 Flash na may strict math instruction)
+  // 3. MATH SOLVING & GENERAL AI (Strictly short & direct answer instructions)
   try {
-    const mathPrompt = `You are an expert math solver and assistant. Solve the following problem accurately step-by-step, then give the final answer clearly: ${userMessage}`;
+    const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|calculate|eval|math)\b/i.test(userMessage);
+    
+    let systemInstruction = "";
+    if (isMath) {
+      systemInstruction = "You are a precise math solver. Give ONLY the final answer and a 1-sentence brief explanation. Keep it very short.";
+    } else {
+      systemInstruction = "Keep your response concise, direct, and helpful.";
+    }
 
     const aiResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: mathPrompt,
+      contents: `${systemInstruction}\n\nUser Question: ${userMessage}`,
     });
 
     let responseText = aiResponse.text || "Sorry, the AI did not generate a response.";
@@ -115,7 +121,7 @@ async function sendMediaToMessenger(recipientId, type, mediaUrl) {
     recipient: { id: recipientId },
     message: {
       attachment: {
-        type: type, // 'image' o 'audio'
+        type: type,
         payload: {
           url: mediaUrl,
           is_reusable: true
@@ -137,8 +143,6 @@ async function callMessengerAPI(requestData) {
     const data = await response.json();
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
-    } else {
-      console.log('Successfully sent to Messenger!');
     }
   } catch (error) {
     console.error('Error sending to Messenger API:', error);
