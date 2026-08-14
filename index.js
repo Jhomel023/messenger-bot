@@ -44,7 +44,7 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song]\n🎨 /image [Prompt]\n✂️ /removebg (Mag-send ng pic kasama ang caption)\n🧠 [Tanong o Math]");
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - Alisin ang background ng larawan (Mag-attach ng pic)\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
     return;
   }
 
@@ -57,20 +57,38 @@ async function handleMsg(senderId, text, imgUrl) {
       await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
       return;
     }
-    await sendText(senderId, "Inaalis ang background...");
+    await sendText(senderId, "Kasalukuyang tinatanggal ang background...");
     try {
+      // 1. I-download muna ang image mula kay FB gamit ang token para hindi ma-block
+      const imgFetch = await fetch(imgUrl);
+      const arrayBuffer = await imgFetch.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64Image = buffer.toString('base64');
+
+      // 2. I pasa sa remove.bg gamit ang file base64 sa halip na url
       const res = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
-        headers: { 'X-Api-Key': process.env.REMOVEBG_API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: imgUrl, size: 'auto' })
+        headers: { 
+          'X-Api-Key': process.env.REMOVEBG_API_KEY, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ 
+          image_file_b64: base64Image, 
+          size: 'auto' 
+        })
       });
+
       if (res.ok) {
-        await sendText(senderId, "Matagumpay na naalis ang background!");
+        const resultBuffer = await res.arrayBuffer();
+        // Dito natin isesend pabalik ang tinanggalan ng background bilang file attachment
+        await sendImageBuffer(senderId, Buffer.from(resultBuffer));
       } else {
-        await sendText(senderId, "May error sa remove.bg API.");
+        const errJson = await res.json();
+        await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
       }
     } catch (e) {
-      await sendText(senderId, "Nagka-error sa pagproseso.");
+      console.error(e);
+      await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
     }
     return;
   }
@@ -128,6 +146,19 @@ async function sendMedia(id, type, url) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recipient: { id }, message: { attachment: { type, payload: { url, is_reusable: true } } } })
+  });
+}
+
+async function sendImageBuffer(id, buffer) {
+  // Paggamit ng multipart/form-data para maibalik ang PNG file na tinanggalan ng background kay user
+  const formData = new FormData();
+  formData.append('recipient', JSON.stringify({ id }));
+  formData.append('message', JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }));
+  formData.append('filedata', new Blob([buffer], { type: 'image/png' }), 'removed-bg.png');
+
+  await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    method: 'POST',
+    body: formData
   });
 }
 
