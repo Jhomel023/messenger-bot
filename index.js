@@ -11,7 +11,8 @@ const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-const ai = new GoogleGenAI();
+// Dito nilagay nang direkta ang apiKey mula sa environment variable
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
