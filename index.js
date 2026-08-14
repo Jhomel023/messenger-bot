@@ -55,16 +55,15 @@ app.post('/webhook', (req, res) => {
 async function handleIncomingMessage(senderId, userMessage) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // 1. MUSIC / PLAY COMMAND (Direct audio search stream simulation)
+  // 1. MUSIC / PLAY COMMAND (Nagse-send ng direct audio record attachment)
   if (lowerMsg.startsWith('/play') || lowerMsg.startsWith('/music')) {
     const query = userMessage.replace(/\/play|\/music/i, '').trim();
-    await sendTextToMessenger(senderId, `Playing: "${query || 'Track'}"`);
+    await sendTextToMessenger(senderId, `Sending audio record for: "${query || 'Track'}"...`);
     
-    // Gamit ang public preview stream na tugma sa query o dynamic sample
-    const encodedQuery = encodeURIComponent(query || 'song');
-    const audioUrl = `https://actions.google.com/sounds/v1/ambiences/rain_heavy.ogg`; // Palitan ng working stream kung may custom API ka
+    // Gagamit tayo ng stable public HTTPS audio sample file URL na compatible sa Messenger attachment upload
+    const audioRecordUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
     
-    await sendMediaToMessenger(senderId, 'audio', audioUrl);
+    await sendMediaToMessenger(senderId, 'audio', audioRecordUrl);
     return;
   }
 
@@ -78,7 +77,7 @@ async function handleIncomingMessage(senderId, userMessage) {
     return;
   }
 
-  // 3. MATH SOLVING & GENERAL AI (Strictly short & direct answer instructions)
+  // 3. MATH SOLVING & GENERAL AI (Maikli at direkta ang sagot)
   try {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|calculate|eval|math)\b/i.test(userMessage);
     
@@ -121,7 +120,7 @@ async function sendMediaToMessenger(recipientId, type, mediaUrl) {
     recipient: { id: recipientId },
     message: {
       attachment: {
-        type: type,
+        type: type, // 'audio' o 'image'
         payload: {
           url: mediaUrl,
           is_reusable: true
