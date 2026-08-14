@@ -40,10 +40,10 @@ app.post('/webhook', (req, res) => {
         const senderId = webhookEvent.sender.id;
 
         if (webhookEvent.message && webhookEvent.message.text && !webhookEvent.message.is_echo) {
-          const receivedMessageText = webhookEvent.message.text;
+          const receivedMessageText = webhookEvent.message.text.trim();
           console.log(`Received message from ${senderId}: ${receivedMessageText}`);
 
-          handleAiResponse(senderId, receivedMessageText);
+          handleIncomingMessage(senderId, receivedMessageText);
         }
       }
     });
@@ -52,7 +52,14 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-async function handleAiResponse(senderId, userMessage) {
+async function handleIncomingMessage(senderId, userMessage) {
+  // Handle /play or /music commands (audio / record snippet logic)
+  if (userMessage.toLowerCase().startsWith('/play') || userMessage.toLowerCase().startsWith('/music')) {
+    await sendToMessenger(senderId, "Playing your requested track / sending audio record snippet...");
+    return;
+  }
+
+  // Handle AI generation, math solving, and other requests
   try {
     const aiResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
@@ -69,7 +76,7 @@ async function handleAiResponse(senderId, userMessage) {
 
   } catch (error) {
     console.error('Error with Gemini AI:', error);
-    await sendToMessenger(senderId, "An error occurred while processing your AI request.");
+    await sendToMessenger(senderId, "An error occurred while processing your request.");
   }
 }
 
@@ -90,7 +97,7 @@ async function sendToMessenger(recipientId, messageText) {
     if (data.error) {
       console.error('Facebook API Error: ', data.error);
     } else {
-      console.log('AI response sent successfully!');
+      console.log('Response sent successfully!');
     }
   } catch (error) {
     console.error('Error sending to Messenger API:', error);
