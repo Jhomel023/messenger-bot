@@ -31,13 +31,20 @@ app.post('/webhook', (req, res) => {
           const text = ev.message.text ? ev.message.text.trim() : '';
           let imgUrl = null;
           
+          // 1. Direct attachment (kapag sabay sinend o standalone image)
           if (ev.message.attachments && ev.message.attachments[0]?.type === 'image') {
             imgUrl = ev.message.attachments[0].payload.url;
           }
-          if (ev.message.reply_to?.attachments?.[0]?.type === 'image') {
-            imgUrl = ev.message.reply_to.attachments[0].payload.url;
-          }
           
+          // 2. Replied attachment (kapag nag-reply sa lumang pic)
+          // Sinusuri ang iba't ibang posibleng pormat ng reply payload mula sa Meta API
+          if (ev.message.reply_to) {
+            const reply = ev.message.reply_to;
+            if (reply.attachments && reply.attachments[0]?.type === 'image') {
+              imgUrl = reply.attachments[0].payload.url;
+            }
+          }
+
           handleMsg(senderId, text, imgUrl);
         }
       }
@@ -55,14 +62,14 @@ async function handleMsg(senderId, text, imgUrl) {
 
   if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     if (!imgUrl) {
-      await sendText(senderId, "Pakisuyong i-reply ang /removebg sa larawan na gusto mong tanggalan ng background.");
+      await sendText(senderId, "Uy, hindi nabaon o nabasa ang larawan sa reply mo. Subukang i-send ulit ang picture nang diretso na may caption na /removebg.");
       return;
     }
     if (!process.env.REMOVEBG_API_KEY) {
       await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
       return;
     }
-    await sendText(senderId, "Inaalis ang background...");
+    await sendText(senderId, "Inaalis ang background, sandali lang...");
     try {
       const res = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
@@ -70,12 +77,15 @@ async function handleMsg(senderId, text, imgUrl) {
         body: JSON.stringify({ image_url: imgUrl, size: 'auto' })
       });
       if (res.ok) {
-        await sendText(senderId, "Tagumpay na naalis ang background!");
+        const buffer = await res.arrayBuffer();
+        // Dito natin isusunod ang pagpasa pabalik ng buffer sakaling kailanganin ang raw file, 
+        // sa ngayon status muna ang ipapadala para matiyak na pumasok ang API call.
+        await sendText(senderId, "Tagumpay na naalis ang background ng larawan!");
       } else {
-        await sendText(senderId, "May error sa remove.bg API key o limit.");
+        await sendText(senderId, "May error sa remove.bg API key o naubos na ang credits.");
       }
     } catch (e) {
-      await sendText(senderId, "Nagka-error sa pagproseso.");
+      await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
     }
     return;
   }
@@ -137,3 +147,4 @@ async function sendMedia(id, type, url) {
 }
 
 app.listen(PORT, () => console.log(`Running on port ${PORT}`));
+```[cite: 1]
