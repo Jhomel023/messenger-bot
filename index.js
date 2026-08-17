@@ -58,6 +58,12 @@ async function processIncomingMessage(senderId, messageObj) {
 
   const low = text.toLowerCase();
 
+  // KAPAG NAG-SEND NG PIC NA WALANG TEXT O MAY KASAMANG /removebg
+  if (imgUrl && (low.startsWith('/removebg') || low.startsWith('/bgremove') || text === '')) {
+    await handleRemoveBg(senderId, imgUrl);
+    return;
+  }
+
   if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
     await handleRemoveBg(senderId, imgUrl);
     return;
