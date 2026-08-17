@@ -77,6 +77,19 @@ async function handleRemoveBg(senderId, imgUrl) {
   }
   await sendText(senderId, "Tinatanggal ang background...");
   try {
+    const imgFetch = await fetch(imgUrl, {
+      headers: { 'Authorization': `Bearer ${PAGE_ACCESS_TOKEN}` }
+    });
+    
+    if (!imgFetch.ok) {
+      await sendText(senderId, "Hindi ma-download ang larawan mula sa Facebook.");
+      return;
+    }
+
+    const arrayBuffer = await imgFetch.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64Image = buffer.toString('base64');
+
     const res = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
       headers: { 
@@ -84,15 +97,14 @@ async function handleRemoveBg(senderId, imgUrl) {
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({ 
-        image_url: imgUrl, 
+        image_file_b64: base64Image, 
         size: 'auto' 
       })
     });
 
     if (res.ok) {
-      const arrayBuffer = await res.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      await sendImageBuffer(senderId, buffer);
+      const resultBuffer = await res.arrayBuffer();
+      await sendImageBuffer(senderId, Buffer.from(resultBuffer));
     } else {
       const errJson = await res.json();
       await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
@@ -149,7 +161,11 @@ async function handleMsg(senderId, text, imgUrl) {
     await sendText(senderId, aiRes.text || "Walang na-generate na sagot.");
   } catch (e) {
     console.error('Gemini AI Error:', e);
-    await sendText(senderId, "Error sa AI response.");
+    if (e.status === 429 || (e.message && e.message.includes('Quota exceeded'))) {
+      await sendText(senderId, "Naubos na ang libreng quota limit ng Gemini API para sa araw na ito. Subukan bukas o gumamit ng ibang API key.");
+    } else {
+      await sendText(senderId, "Error sa AI response.");
+    }
   }
 }
 
@@ -170,15 +186,40 @@ async function sendMedia(id, type, url) {
 }
 
 async function sendImageBuffer(id, buffer) {
-  const formData = new FormData();
-  formData.append('recipient', JSON.stringify({ id }));
-  formData.append('message', JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }));
-  formData.append('filedata', new Blob([buffer], { type: 'image/png' }), 'removed-bg.png');
+  const boundary = '-----------------' + Date.now();
+  
+  const header = Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="recipient"\r\n\r\n` +
+    JSON.stringify({ id }) + `\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="message"\r\n\r\n` +
+    JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }) + `\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="filedata"; filename="removed-bg.png"\r\n` +
+    `Content-Type: image/png\r\n\r\n`
+  );
 
-  await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-    method: 'POST',
-    body: formData
-  });
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const fullBody = Buffer.concat([header, buffer, footer]);
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`
+      },
+      body: fullBody
+    });
+    
+    const resJson = await res.json();
+    if (!res.ok) {
+      console.error('FB Send Image Error:', resJson);
+      await sendText(id, "Nagka-error sa pagpapadala ng tinanggal na background mula sa Facebook API.");
+    }
+  } catch (err) {
+    console.error('Fetch sendImageBuffer Error:', err);
+  }
 }
 
 app.listen(PORT, () => console.log(`Running on port ${PORT}`));
