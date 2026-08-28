@@ -12,6 +12,9 @@ const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
+// Memory para itabi ang huling image ng bawat user
+const userLastImage = {};
+
 let ai;
 if (process.env.GEMINI_API_KEY) {
   ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -44,41 +47,45 @@ app.post('/webhook', (req, res) => {
 async function processIncomingMessage(senderId, messageObj) {
   const text = messageObj.text ? messageObj.text.trim() : '';
   let fileUrl = null;
-  let fileType = null;
 
+  // 1. Kumuha ng image kung may isinend na attachment sa mismong message
   if (messageObj.attachments && messageObj.attachments[0]) {
-    fileUrl = messageObj.attachments[0].payload?.url;
-    fileType = messageObj.attachments[0].type;
+    const att = messageObj.attachments[0];
+    if (att.type === 'image' || att.payload?.url) {
+      fileUrl = att.payload?.url;
+      // ITABI SA MEMORY ANG HULING IMAGE NI USER
+      userLastImage[senderId] = fileUrl;
+    }
   }
 
+  // 2. Kumuha mula sa Replied Message (kung may makuha sa Graph API)
   if (!fileUrl && messageObj.reply_to && messageObj.reply_to.mid) {
     try {
-      const graphRes = await fetch(`https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`);
+      const graphRes = await fetch(
+        `https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
+      );
       const data = await graphRes.json();
-      
-      const attachment = data.attachments?.data?.[0];
-      if (attachment) {
-        fileUrl = attachment.payload?.url || attachment.file_url;
-        fileType = attachment.type;
-      }
+      fileUrl = data.attachments?.data?.[0]?.payload?.url || data.attachments?.data?.[0]?.image_data?.url;
     } catch (err) {
-      console.error('Error sa pagkuha ng nireplyan na file:', err);
+      console.error('FB Reply Fetch Error:', err);
     }
+  }
+
+  // 3. KUNG WALA PA RIN, GAMITIN ANG HULING ISINEND NA IMAGE MULA SA MEMORY
+  if (!fileUrl && userLastImage[senderId]) {
+    fileUrl = userLastImage[senderId];
   }
 
   const low = text.toLowerCase();
 
+  // COMMAND: /topdf o /pdf
   if (low.startsWith('/topdf') || low.startsWith('/pdf')) {
-    await handleConvertToPdf(senderId, fileUrl, fileType, text);
+    await handleConvertToPdf(senderId, fileUrl, text);
     return;
   }
 
-  if (fileUrl && (low.startsWith('/removebg') || low.startsWith('/bgremove') || text === '')) {
-    await handleRemoveBg(senderId, fileUrl);
-    return;
-  }
-
-  if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
+  // COMMAND: /removebg o /bgremove
+  if (fileUrl && (low.startsWith('/removebg') || low.startsWith('/bgremove'))) {
     await handleRemoveBg(senderId, fileUrl);
     return;
   }
@@ -86,9 +93,10 @@ async function processIncomingMessage(senderId, messageObj) {
   handleMsg(senderId, text, fileUrl);
 }
 
-async function handleConvertToPdf(senderId, fileUrl, fileType, text) {
+async function handleConvertToPdf(senderId, fileUrl, text) {
   const contentText = text.replace(/\/topdf|\/pdf/i, '').trim();
 
+  // KUNG MAY NAHANAP NA IMAGE (MULA SA ATTACHMENT, REPLY, O MEMORY)
   if (fileUrl) {
     await sendText(senderId, "Ginagawang PDF ang iyong larawan...");
     try {
@@ -97,7 +105,6 @@ async function handleConvertToPdf(senderId, fileUrl, fileType, text) {
       
       const pdfDoc = await PDFDocument.create();
       let image;
-      
       try {
         image = await pdfDoc.embedJpg(imgArrayBuffer);
       } catch (e) {
@@ -108,6 +115,10 @@ async function handleConvertToPdf(senderId, fileUrl, fileType, text) {
       page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
 
       const pdfBytes = await pdfDoc.save();
+      
+      // Linisin ang memory pagkatapos ma-convert
+      delete userLastImage[senderId];
+
       await sendFileBuffer(senderId, Buffer.from(pdfBytes), 'converted.pdf', 'application/pdf');
     } catch (err) {
       console.error('PDF Conversion Error:', err);
@@ -116,6 +127,7 @@ async function handleConvertToPdf(senderId, fileUrl, fileType, text) {
     return;
   }
 
+  // KUNG TEKSTO LANG ANG IPINADALA
   if (contentText) {
     await sendText(senderId, "Ginagawang PDF ang iyong teksto...");
     try {
@@ -128,7 +140,7 @@ async function handleConvertToPdf(senderId, fileUrl, fileType, text) {
     return;
   }
 
-  await sendText(senderId, "Mag-reply ng /topdf sa isang larawan o kaya mag-type ng text tulad ng: /topdf [teksto mo dito]");
+  await sendText(senderId, "Mag-send muna ng larawan sa chat, saka i-type ang /topdf.");
 }
 
 function createPdfFromText(text) {
@@ -147,7 +159,7 @@ function createPdfFromText(text) {
 
 async function handleRemoveBg(senderId, imgUrl) {
   if (!imgUrl) {
-    await sendText(senderId, "Mangyaring i-reply ang /removebg sa larawan o kaya i-attach ang larawan kasama ang caption na /removebg.");
+    await sendText(senderId, "Mag-send muna ng larawan bago mag /removebg.");
     return;
   }
   if (!process.env.REMOVEBG_API_KEY) {
@@ -157,9 +169,8 @@ async function handleRemoveBg(senderId, imgUrl) {
   await sendText(senderId, "Tinatanggal ang background...");
   try {
     const imgFetch = await fetch(imgUrl);
-    
     if (!imgFetch.ok) {
-      await sendText(senderId, "Hindi ma-download ang larawan mula sa Facebook.");
+      await sendText(senderId, "Hindi ma-download ang larawan.");
       return;
     }
 
@@ -173,14 +184,12 @@ async function handleRemoveBg(senderId, imgUrl) {
         'X-Api-Key': process.env.REMOVEBG_API_KEY, 
         'Content-Type': 'application/json' 
       },
-      body: JSON.stringify({ 
-        image_file_b64: base64Image, 
-        size: 'auto' 
-      })
+      body: JSON.stringify({ image_file_b64: base64Image, size: 'auto' })
     });
 
     if (res.ok) {
       const resultBuffer = await res.arrayBuffer();
+      delete userLastImage[senderId];
       await sendFileBuffer(senderId, Buffer.from(resultBuffer), 'removed-bg.png', 'image/png');
     } else {
       const errJson = await res.json();
@@ -196,7 +205,7 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap at magpatugtog ng kanta\n🎨 /image [Prompt] - Gumawa ng AI image\n✂️ /removebg - Alisin ang background ng larawan\n📄 /topdf - Gawing PDF ang larawan o teksto\n🧠 [Tanong o Math] - Magtanong kay Gemini AI");
+    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap ng kanta\n🎨 /image [Prompt] - AI image\n✂️ /removebg - Remove background\n📄 /topdf - Gawing PDF ang huling larawan o teksto\n🧠 [Tanong] - Magtanong kay Gemini AI");
     return;
   }
 
@@ -236,7 +245,6 @@ async function handleMsg(senderId, text, imgUrl) {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text);
     const sys = isMath ? "Give ONLY the final answer and 1-sentence brief explanation." : "Be concise, direct, and friendly.";
     
-    // Ginamit ang free-tier model (gemini-2.5-flash)
     const aiRes = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `${sys}\n\nUser: ${text}`
