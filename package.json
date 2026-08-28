@@ -1,8 +1,8 @@
 {
   "dependencies": {
-    "@google/genai": "^0.1.1",
-    "express": "^4.18.2",
+    "@google/genai": "latest",
     "body-parser": "^1.20.2",
+    "express": "^4.18.2",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.15.0"
   }
