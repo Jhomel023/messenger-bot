@@ -1,5 +1,15 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
+const http = require('http');
+
+// --- RENDER HTTP PORT BINDING FIX ---
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running alive!\n');
+}).listen(PORT, () => {
+    console.log(`HTTP server listening on port ${PORT}`);
+});
 
 // --- TELEGRAM BOT CONFIGURATION (HTTP API) ---
 const TOKEN = '8973813335:AAG4BTEw5O-lmnhOuApDOp_DmQa0TWBRB60';
