@@ -108,14 +108,16 @@ function generateRandomInfo() {
     startTelegramPolling();
 
     const browser = await chromium.launch({ 
-        headless: true, // Required for cloud environments like Render
+        headless: true, 
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process',
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--ozone-platform=headless',
+            '--disable-software-rasterizer'
         ]
     });
 
