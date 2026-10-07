@@ -33,8 +33,15 @@ async function startTelegramPolling() {
                         const chatId = update.message.chat.id;
                         const text = update.message.text.trim();
 
+                        // Handle /start command
                         if (text.startsWith('/start')) {
-                            await sendTelegramMessage(chatId, `👋 *Welcome sa Automation Bot!*\n\nMag-send lang ng CC list sa format na ito:\n\`CC|MM|YYYY|CVV\`\n\nDirekta itong mapupunta sa queue at ipoproseso agad.`);
+                            await sendTelegramMessage(chatId, `👋 *Welcome to the Automation Bot!*\n\nSend your card list using the format:\n\`CC|MM|YYYY|CVV\`\n\nType /cvv for quick instructions.`);
+                            continue;
+                        }
+
+                        // Handle /cvv command
+                        if (text.startsWith('/cvv')) {
+                            await sendTelegramMessage(chatId, `💳 *Card Submission Guide*\n\nSend cards in this format:\n\`CC|MM|YYYY|CVV\`\n\n*Example:*\n\`4111111111111111|12|2028|123\`\n\nThey will be added straight to the processing queue automatically.`);
                             continue;
                         }
 
@@ -51,9 +58,9 @@ async function startTelegramPolling() {
                         });
 
                         if (addedCount > 0) {
-                            await sendTelegramMessage(chatId, `✅ Naidagdag ang ${addedCount} CC(s) sa queue! 🚀 Pinoproseso na...`);
+                            await sendTelegramMessage(chatId, `✅ Added ${addedCount} CC(s) to the queue! 🚀 Processing now...`);
                         } else {
-                            await sendTelegramMessage(chatId, `❌ Invalid format. Gamitin ang:\n\`CC|MM|YYYY|CVV\``);
+                            await sendTelegramMessage(chatId, `❌ Invalid format. Please use:\n\`CC|MM|YYYY|CVV\``);
                         }
                     }
                 }
@@ -97,11 +104,11 @@ function generateRandomInfo() {
         fs.writeFileSync('cc.txt', '');
     }
 
-    // Simulan ang background Telegram bot listener
+    // Start background Telegram listener
     startTelegramPolling();
 
     const browser = await chromium.launch({ 
-        headless: true, // Naka-true na para gumana sa Render/Linux server
+        headless: true, // Required for cloud environments like Render
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process',
