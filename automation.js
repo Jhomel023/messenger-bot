@@ -19,7 +19,7 @@ async function sendTelegramMessage(chatId, text) {
     } catch (e) {}
 }
 
-// Background Telegram Polling (Hindi na maaabala ng Playwright automation)
+// Background Telegram Polling
 async function startTelegramPolling() {
     setInterval(async () => {
         try {
@@ -101,15 +101,18 @@ function generateRandomInfo() {
     startTelegramPolling();
 
     const browser = await chromium.launch({ 
-        headless: false,
+        headless: true, // Naka-true na para gumana sa Render/Linux server
         args: [
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process',
-            '--no-sandbox'
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu'
         ]
     });
 
-    logCyan("Telegram Bot Background Listener & Direct Connection Automation started...");
+    logCyan("Telegram Bot Background Listener & Cloud Automation started...");
 
     while (true) {
         const fileContent = fs.readFileSync('cc.txt', 'utf-8');
