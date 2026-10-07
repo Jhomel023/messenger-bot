@@ -41,7 +41,7 @@ async function startTelegramPolling() {
                     lastUpdateId = update.update_id;
                     if (update.message && update.message.text) {
                         const chatId = update.message.chat.id;
-                        const text = update.message.text.trim();
+                        let text = update.message.text.trim();
 
                         // Handle /start command
                         if (text.startsWith('/start')) {
@@ -49,10 +49,16 @@ async function startTelegramPolling() {
                             continue;
                         }
 
-                        // Handle /cvv command
+                        // Handle /cvv command (supports /cvv [card] or just /cvv)
                         if (text.startsWith('/cvv')) {
-                            await sendTelegramMessage(chatId, `💳 *Card Submission Guide*\n\nSend cards in this format:\n\`CC|MM|YYYY|CVV\`\n\n*Example:*\n\`4111111111111111|12|2028|123\`\n\nThey will be added straight to the processing queue automatically.`);
-                            continue;
+                            const cleanText = text.replace('/cvv', '').trim();
+                            if (!cleanText.includes('|')) {
+                                await sendTelegramMessage(chatId, `💳 *Card Submission Guide*\n\nSend cards in this format:\n\`CC|MM|YYYY|CVV\`\n\n*Example:*\n\`4111111111111111|12|2028|123\`\n\nThey will be added straight to the processing queue automatically.`);
+                                continue;
+                            } else {
+                                // If card details are provided right after /cvv, process them as card text
+                                text = cleanText;
+                            }
                         }
 
                         if (text.startsWith('/')) continue;
