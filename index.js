@@ -283,12 +283,16 @@ async function handleMsg(senderId, text, imgUrl) {
       const ssApi = `https://api.microlink.io/?url=${encodeURIComponent(siteUrl)}&screenshot=true`;
       const res = await fetch(ssApi);
       const json = await res.json();
-      if (json.data && json.data.screenshot) {
-        await sendMedia(senderId, 'image', json.data.screenshot.url);
+      if (json.data && json.data.screenshot && json.data.screenshot.url) {
+        const imgRes = await fetch(json.data.screenshot.url);
+        const arrayBuf = await imgRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        await sendFileBuffer(senderId, buffer, 'screenshot.jpg', 'image/jpeg');
       } else {
         await sendText(senderId, "Could not capture website screenshot.");
       }
     } catch (e) {
+      console.error('Screenshot Error:', e);
       await sendText(senderId, "Error generating screenshot.");
     }
     return;
@@ -371,8 +375,13 @@ async function handleMsg(senderId, text, imgUrl) {
     await sendText(senderId, "Generating QR Code...");
     try {
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(qrText)}`;
-      await sendMedia(senderId, 'image', qrUrl);
+      const qrRes = await fetch(qrUrl);
+      if (!qrRes.ok) throw new Error('Failed to fetch QR image');
+      const arrayBuf = await qrRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      await sendFileBuffer(senderId, buffer, 'qrcode.png', 'image/png');
     } catch (e) {
+      console.error('QR Error:', e);
       await sendText(senderId, "Error generating QR code.");
     }
     return;
@@ -424,7 +433,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  // IMAGE GENERATION WITH SAFE FALLBACK
+  // IMAGE GENERATION WITH BUFFER UPLOAD FIX
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
     const rawPrompt = text.replace(/\/image|\/draw|\/generate/i, '').trim();
     if (!rawPrompt) {
@@ -456,10 +465,17 @@ async function handleMsg(senderId, text, imgUrl) {
 
     try {
       const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?nologo=true&enhance=true`;
-      await sendMedia(senderId, 'image', imageUrl);
+      
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error('Failed to download image from generator');
+      
+      const arrayBuf = await imgRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      
+      await sendFileBuffer(senderId, buffer, 'generated-image.jpg', 'image/jpeg');
     } catch (err) {
       console.error('Image Send Error:', err);
-      await sendText(senderId, "Error sending image to Messenger.");
+      await sendText(senderId, "Error sending generated image to Messenger.");
     }
     return;
   }
