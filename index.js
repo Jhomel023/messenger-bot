@@ -210,7 +210,7 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image (Powered by Gemini Prompt AI)\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
+    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
     return;
   }
 
@@ -235,7 +235,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  // GEMINI AI PROMPT ENHANCER (Works on Free Tier Key)
+  // IMAGE GENERATION WITH SAFE FALLBACK
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
     const rawPrompt = text.replace(/\/image|\/draw|\/generate/i, '').trim();
     if (!rawPrompt) {
@@ -243,26 +243,34 @@ async function handleMsg(senderId, text, imgUrl) {
       return;
     }
 
-    if (!ai) {
-      await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
-      return;
+    await sendText(senderId, "Generating AI image...");
+
+    let finalPrompt = rawPrompt;
+
+    if (ai) {
+      try {
+        const geminiPromptResponse = await ai.models.generateContent({
+          model: 'gemini-1.5-flash',
+          contents: `Convert this simple idea into a concise visual prompt for image generation under 25 words: ${rawPrompt}`
+        });
+
+        if (geminiPromptResponse && geminiPromptResponse.text) {
+          finalPrompt = geminiPromptResponse.text.trim();
+        }
+      } catch (err) {
+        console.error('Gemini prompt enhancement bypassed:', err);
+        finalPrompt = `${rawPrompt}, highly detailed, 8k resolution, photorealistic`;
+      }
+    } else {
+      finalPrompt = `${rawPrompt}, highly detailed, 8k resolution, photorealistic`;
     }
 
-    await sendText(senderId, "Gemini AI is generating your image prompt...");
-
     try {
-      const geminiPromptResponse = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: `You are an expert AI prompt engineer. Convert this user idea into a detailed, photorealistic visual description for image generation. Keep it under 30 words. Return ONLY the description, nothing else.\n\nUser Idea: ${rawPrompt}`
-      });
-
-      const enhancedPrompt = geminiPromptResponse.text ? geminiPromptResponse.text.trim() : rawPrompt;
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?nologo=true&enhance=true`;
-      
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?nologo=true&enhance=true`;
       await sendMedia(senderId, 'image', imageUrl);
     } catch (err) {
-      console.error('Gemini Image Error:', err);
-      await sendText(senderId, "Error generating image with Gemini AI.");
+      console.error('Image Send Error:', err);
+      await sendText(senderId, "Error sending image to Messenger.");
     }
     return;
   }
