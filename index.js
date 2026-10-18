@@ -74,7 +74,7 @@ async function processIncomingMessage(senderId, messageObj) {
 
   const low = text.toLowerCase();
 
-  if (low.startsWith('/topdf') || low.startsWith('/pdf')) {
+  if (low.startsWith('/pdf') || low.startsWith('/topdf')) {
     await handleConvertToPdf(senderId, fileUrl, text);
     return;
   }
@@ -88,7 +88,7 @@ async function processIncomingMessage(senderId, messageObj) {
 }
 
 async function handleConvertToPdf(senderId, fileUrl, text) {
-  const contentText = text.replace(/\/topdf|\/pdf/i, '').trim();
+  const contentText = text.replace(/\/pdf|\/topdf/i, '').trim();
 
   if (fileUrl) {
     await sendText(senderId, "Converting to PDF...");
@@ -145,7 +145,7 @@ async function handleConvertToPdf(senderId, fileUrl, text) {
     return;
   }
 
-  await sendText(senderId, "Please send an image or DOCX file first, then type /topdf.");
+  await sendText(senderId, "Please send an image or DOCX file first, then type /pdf.");
 }
 
 function createPdfFromText(text) {
@@ -209,11 +209,200 @@ async function handleRemoveBg(senderId, imgUrl) {
 async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
+  // HELP / MENU
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
+    await sendText(
+      senderId,
+      "🤖 Pollar Bot Assistant\n\n📄 /pdf - Convert image/DOCX/text to PDF\n🌐 /tr [Text] - Translate Tagalog <-> English\n📱 /qr [Link/Text] - Generate QR Code\n🔱 /fx [Amount] [From] [To] - Currency converter\n🌤️ /weather [City] - Live weather report\n🗣️ /say [Text] - Text-To-Speech voice note\n🔗 /short [Link] - Shorten long URLs\n📸 /ss [Link] - Screenshot website\n📚 /wiki [Topic] - Wikipedia search\n📖 /dict [Word] - Dictionary lookup\n🎨 /image [Prompt] - Generate AI Image\n🎵 /play [Song Title] - Search music preview\n✂️ /removebg - Remove image background\n🧠 [Ask Question] - Ask Gemini AI"
+    );
     return;
   }
 
+  // CURRENCY CONVERTER (/fx 100 USD PHP)
+  if (low.startsWith('/fx') || low.startsWith('/convert')) {
+    const parts = text.replace(/\/fx|\/convert/i, '').trim().split(/\s+/);
+    if (parts.length < 3) {
+      await sendText(senderId, "Format: /fx [amount] [from] [to]\nExample: /fx 100 USD PHP");
+      return;
+    }
+    const amount = parseFloat(parts[0]);
+    const from = parts[1].toUpperCase();
+    const to = parts[2].toUpperCase();
+    if (isNaN(amount)) {
+      await sendText(senderId, "Please enter a valid amount.");
+      return;
+    }
+    try {
+      const res = await fetch(`https://open.er-api.com/v6/latest/${from}`);
+      const data = await res.json();
+      if (data.result === 'success' && data.rates && data.rates[to]) {
+        const rate = data.rates[to];
+        const converted = (amount * rate).toFixed(2);
+        await sendText(senderId, `🔱 ${amount} ${from} = ${converted} ${to}\n(Rate: 1 ${from} = ${rate} ${to})`);
+      } else {
+        await sendText(senderId, "Unsupported currency code.");
+      }
+    } catch (e) {
+      await sendText(senderId, "Error fetching exchange rates.");
+    }
+    return;
+  }
+
+  // DICTIONARY LOOKUP (/dict word)
+  if (low.startsWith('/dict') || low.startsWith('/define')) {
+    const word = text.replace(/\/dict|\/define/i, '').trim();
+    if (!word) {
+      await sendText(senderId, "Please specify a word. Example: /dict persistent");
+      return;
+    }
+    try {
+      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]?.meanings?.[0]?.definitions?.[0]?.definition) {
+        const def = data[0].meanings[0].definitions[0].definition;
+        const pos = data[0].meanings[0].partOfSpeech || '';
+        await sendText(senderId, `📖 ${data[0].word} (${pos}):\n${def}`);
+      } else {
+        await sendText(senderId, "Word definition not found.");
+      }
+    } catch (e) {
+      await sendText(senderId, "Error fetching definition.");
+    }
+    return;
+  }
+
+  // WEBSITE SCREENSHOT (/ss link)
+  if (low.startsWith('/ss') || low.startsWith('/screenshot')) {
+    const siteUrl = text.replace(/\/ss|\/screenshot/i, '').trim();
+    if (!siteUrl) {
+      await sendText(senderId, "Please provide a URL. Example: /ss https://google.com");
+      return;
+    }
+    await sendText(senderId, "Taking website screenshot...");
+    try {
+      const ssApi = `https://api.microlink.io/?url=${encodeURIComponent(siteUrl)}&screenshot=true`;
+      const res = await fetch(ssApi);
+      const json = await res.json();
+      if (json.data && json.data.screenshot) {
+        await sendMedia(senderId, 'image', json.data.screenshot.url);
+      } else {
+        await sendText(senderId, "Could not capture website screenshot.");
+      }
+    } catch (e) {
+      await sendText(senderId, "Error generating screenshot.");
+    }
+    return;
+  }
+
+  // URL SHORTENER (/short link)
+  if (low.startsWith('/short') || low.startsWith('/shorten')) {
+    const longUrl = text.replace(/\/short|\/shorten/i, '').trim();
+    if (!longUrl) {
+      await sendText(senderId, "Please provide a long link. Example: /short https://example.com/very-long-url");
+      return;
+    }
+    try {
+      const res = await fetch(`https://is.gd/create.php?format=json&url=${encodeURIComponent(longUrl)}`);
+      const data = await res.json();
+      if (data.shorturl) {
+        await sendText(senderId, `🔗 Shortened Link:\n${data.shorturl}`);
+      } else {
+        await sendText(senderId, "Failed to shorten link.");
+      }
+    } catch (e) {
+      await sendText(senderId, "Error shortening link.");
+    }
+    return;
+  }
+
+  // WEATHER REPORT (/weather city)
+  if (low.startsWith('/weather') || low.startsWith('/panahon')) {
+    const city = text.replace(/\/weather|\/panahon/i, '').trim() || 'Manila';
+    try {
+      const res = await fetch(`https://wttr.in/${encodeURIComponent(city)}?format=3`);
+      const weatherText = await res.text();
+      await sendText(senderId, `🌤️ Weather Report:\n${weatherText.trim()}`);
+    } catch (e) {
+      await sendText(senderId, "Error fetching weather report.");
+    }
+    return;
+  }
+
+  // TEXT TO SPEECH AUDIO VOICE NOTE (/say text)
+  if (low.startsWith('/say') || low.startsWith('/tts')) {
+    const speechText = text.replace(/\/say|\/tts/i, '').trim();
+    if (!speechText) {
+      await sendText(senderId, "Please provide text. Example: /say Hello world!");
+      return;
+    }
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(speechText)}`;
+    await sendMedia(senderId, 'audio', ttsUrl);
+    return;
+  }
+
+  // WIKIPEDIA SEARCH (/wiki topic)
+  if (low.startsWith('/wiki')) {
+    const query = text.replace(/\/wiki/i, '').trim();
+    if (!query) {
+      await sendText(senderId, "Please provide a topic. Example: /wiki Rizal");
+      return;
+    }
+    try {
+      const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.extract) {
+        await sendText(senderId, `📚 ${data.title}\n\n${data.extract}`);
+      } else {
+        await sendText(senderId, "No Wikipedia article found.");
+      }
+    } catch (e) {
+      await sendText(senderId, "Error searching Wikipedia.");
+    }
+    return;
+  }
+
+  // QR CODE GENERATOR (/qr link)
+  if (low.startsWith('/qr')) {
+    const qrText = text.replace(/\/qr/i, '').trim();
+    if (!qrText) {
+      await sendText(senderId, "Please provide a link or text. Example: /qr https://google.com");
+      return;
+    }
+    await sendText(senderId, "Generating QR Code...");
+    try {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(qrText)}`;
+      await sendMedia(senderId, 'image', qrUrl);
+    } catch (e) {
+      await sendText(senderId, "Error generating QR code.");
+    }
+    return;
+  }
+
+  // TRANSLATOR (/tr text)
+  if (low.startsWith('/tr') || low.startsWith('/translate')) {
+    const transText = text.replace(/\/tr|\/translate/i, '').trim();
+    if (!transText) {
+      await sendText(senderId, "Please provide text to translate. Example: /tr Magandang umaga");
+      return;
+    }
+    if (!ai) {
+      await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
+      return;
+    }
+    try {
+      const aiRes = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: `Translate the following text accurately. If it is in Tagalog/Filipino, translate to English. If in English or another language, translate to Tagalog. Provide ONLY the final translation without explanations:\n\n${transText}`
+      });
+      await sendText(senderId, aiRes.text ? aiRes.text.trim() : "Translation failed.");
+    } catch (e) {
+      console.error('Translation Error:', e);
+      await sendText(senderId, "Error processing translation.");
+    }
+    return;
+  }
+
+  // MUSIC SEARCH (/play song)
   if (low.startsWith('/play') || low.startsWith('/music')) {
     const q = text.replace(/\/play|\/music/i, '').trim();
     if (!q) {
@@ -280,6 +469,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
+  // DEFAULT GEMINI CHAT
   try {
     const cleanQuery = text.replace(/^\/math\s*/i, '').trim();
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text) || low.startsWith('/math');
