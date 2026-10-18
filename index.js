@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const { GoogleGenAI } = require('@google/genai');
 const { PDFDocument } = require('pdf-lib');
 const PDFKit = require('pdfkit');
+const mammoth = require('mammoth');
 
 const app = express();
 app.use(bodyParser.json());
@@ -12,7 +13,6 @@ const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// Memory para itabi ang huling image ng bawat user
 const userLastImage = {};
 
 let ai;
@@ -48,17 +48,14 @@ async function processIncomingMessage(senderId, messageObj) {
   const text = messageObj.text ? messageObj.text.trim() : '';
   let fileUrl = null;
 
-  // 1. Kumuha ng image kung may isinend na attachment sa mismong message
   if (messageObj.attachments && messageObj.attachments[0]) {
     const att = messageObj.attachments[0];
-    if (att.type === 'image' || att.payload?.url) {
-      fileUrl = att.payload?.url;
-      // ITABI SA MEMORY ANG HULING IMAGE NI USER
+    fileUrl = att.payload?.url;
+    if (att.type === 'image' || fileUrl) {
       userLastImage[senderId] = fileUrl;
     }
   }
 
-  // 2. Kumuha mula sa Replied Message (kung may makuha sa Graph API)
   if (!fileUrl && messageObj.reply_to && messageObj.reply_to.mid) {
     try {
       const graphRes = await fetch(
@@ -71,20 +68,17 @@ async function processIncomingMessage(senderId, messageObj) {
     }
   }
 
-  // 3. KUNG WALA PA RIN, GAMITIN ANG HULING ISINEND NA IMAGE MULA SA MEMORY
   if (!fileUrl && userLastImage[senderId]) {
     fileUrl = userLastImage[senderId];
   }
 
   const low = text.toLowerCase();
 
-  // COMMAND: /topdf o /pdf
   if (low.startsWith('/topdf') || low.startsWith('/pdf')) {
     await handleConvertToPdf(senderId, fileUrl, text);
     return;
   }
 
-  // COMMAND: /removebg o /bgremove
   if (fileUrl && (low.startsWith('/removebg') || low.startsWith('/bgremove'))) {
     await handleRemoveBg(senderId, fileUrl);
     return;
@@ -96,51 +90,62 @@ async function processIncomingMessage(senderId, messageObj) {
 async function handleConvertToPdf(senderId, fileUrl, text) {
   const contentText = text.replace(/\/topdf|\/pdf/i, '').trim();
 
-  // KUNG MAY NAHANAP NA IMAGE (MULA SA ATTACHMENT, REPLY, O MEMORY)
   if (fileUrl) {
-    await sendText(senderId, "Ginagawang PDF ang iyong larawan...");
+    await sendText(senderId, "Converting to PDF...");
     try {
-      const imgRes = await fetch(fileUrl);
-      const imgArrayBuffer = await imgRes.arrayBuffer();
-      
+      const fileRes = await fetch(fileUrl);
+      const arrayBuffer = await fileRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      if (fileUrl.includes('.docx') || fileUrl.includes('.doc')) {
+        const result = await mammoth.extractRawText({ buffer: buffer });
+        const extractedText = result.value;
+
+        if (!extractedText.trim()) {
+          await sendText(senderId, "No text found inside the DOCX file.");
+          return;
+        }
+
+        const pdfBuffer = await createPdfFromText(extractedText);
+        delete userLastImage[senderId];
+        await sendFileBuffer(senderId, pdfBuffer, 'converted-doc.pdf', 'application/pdf');
+        return;
+      }
+
       const pdfDoc = await PDFDocument.create();
       let image;
       try {
-        image = await pdfDoc.embedJpg(imgArrayBuffer);
+        image = await pdfDoc.embedJpg(buffer);
       } catch (e) {
-        image = await pdfDoc.embedPng(imgArrayBuffer);
+        image = await pdfDoc.embedPng(buffer);
       }
 
       const page = pdfDoc.addPage([image.width, image.height]);
       page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
 
       const pdfBytes = await pdfDoc.save();
-      
-      // Linisin ang memory pagkatapos ma-convert
       delete userLastImage[senderId];
 
-      await sendFileBuffer(senderId, Buffer.from(pdfBytes), 'converted.pdf', 'application/pdf');
+      await sendFileBuffer(senderId, Buffer.from(pdfBytes), 'converted-image.pdf', 'application/pdf');
     } catch (err) {
       console.error('PDF Conversion Error:', err);
-      await sendText(senderId, "Nagka-error sa pag-convert ng image sa PDF.");
+      await sendText(senderId, "Error converting file to PDF.");
     }
     return;
   }
 
-  // KUNG TEKSTO LANG ANG IPINADALA
   if (contentText) {
-    await sendText(senderId, "Ginagawang PDF ang iyong teksto...");
+    await sendText(senderId, "Converting text to PDF...");
     try {
       const pdfBuffer = await createPdfFromText(contentText);
       await sendFileBuffer(senderId, pdfBuffer, 'document.pdf', 'application/pdf');
     } catch (err) {
-      console.error('PDF Text Conversion Error:', err);
-      await sendText(senderId, "Nagka-error sa paggawa ng PDF mula sa teksto.");
+      await sendText(senderId, "Error generating PDF from text.");
     }
     return;
   }
 
-  await sendText(senderId, "Mag-send muna ng larawan sa chat, saka i-type ang /topdf.");
+  await sendText(senderId, "Please send an image or DOCX file first, then type /topdf.");
 }
 
 function createPdfFromText(text) {
@@ -159,18 +164,18 @@ function createPdfFromText(text) {
 
 async function handleRemoveBg(senderId, imgUrl) {
   if (!imgUrl) {
-    await sendText(senderId, "Mag-send muna ng larawan bago mag /removebg.");
+    await sendText(senderId, "Please send an image first before typing /removebg.");
     return;
   }
   if (!process.env.REMOVEBG_API_KEY) {
-    await sendText(senderId, "I-set muna ang REMOVEBG_API_KEY sa Render environment variables.");
+    await sendText(senderId, "Please set REMOVEBG_API_KEY in Render environment variables.");
     return;
   }
-  await sendText(senderId, "Tinatanggal ang background...");
+  await sendText(senderId, "Removing background...");
   try {
     const imgFetch = await fetch(imgUrl);
     if (!imgFetch.ok) {
-      await sendText(senderId, "Hindi ma-download ang larawan.");
+      await sendText(senderId, "Failed to download image.");
       return;
     }
 
@@ -193,11 +198,11 @@ async function handleRemoveBg(senderId, imgUrl) {
       await sendFileBuffer(senderId, Buffer.from(resultBuffer), 'removed-bg.png', 'image/png');
     } else {
       const errJson = await res.json();
-      await sendText(senderId, `Error sa remove.bg: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
+      await sendText(senderId, `Remove.bg error: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
     }
   } catch (e) {
     console.error('Removebg Error:', e);
-    await sendText(senderId, "Nagka-error sa pagproseso ng background removal.");
+    await sendText(senderId, "Error processing background removal.");
   }
 }
 
@@ -205,14 +210,14 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Bot ni Jhomel\n\nCommands:\n🎵 /play [Song Title] - Maghanap ng kanta\n🎨 /image [Prompt] - AI image\n✂️ /removebg - Remove background\n📄 /topdf - Gawing PDF ang huling larawan o teksto\n🧠 [Tanong] - Magtanong kay Gemini AI");
+    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
     return;
   }
 
   if (low.startsWith('/play') || low.startsWith('/music')) {
     const q = text.replace(/\/play|\/music/i, '').trim();
     if (!q) {
-      await sendText(senderId, "Maglagay ng kanta. Halimbawa: /play Chase Atlantic");
+      await sendText(senderId, "Please specify a song title. Example: /play Chase Atlantic");
       return;
     }
     try {
@@ -222,40 +227,46 @@ async function handleMsg(senderId, text, imgUrl) {
         await sendText(senderId, `Now playing: ${d.data[0].title} by ${d.data[0].artist.name}`);
         await sendMedia(senderId, 'audio', d.data[0].preview);
       } else {
-        await sendText(senderId, "Walang nakitang kanta.");
+        await sendText(senderId, "No song found.");
       }
     } catch (e) {
-      await sendText(senderId, "Error sa paghanap ng kanta.");
+      await sendText(senderId, "Error searching for song.");
     }
     return;
   }
 
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
-    const p = text.replace(/\/image|\/draw|\/generate/i, '').trim() || 'Cinematic view';
-    await sendMedia(senderId, 'image', `https://image.pollinations.ai/prompt/${encodeURIComponent(p)}`);
+    const rawPrompt = text.replace(/\/image|\/draw|\/generate/i, '').trim() || 'Cinematic view';
+    // Dagdagan ng quality keywords para mas maganda ang result ng Pollinations AI
+    const enhancedPrompt = `${rawPrompt}, highly detailed, 8k resolution, photorealistic, masterpiece`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?nologo=true&enhance=true`;
+    
+    await sendText(senderId, "Generating AI image...");
+    await sendMedia(senderId, 'image', imageUrl);
     return;
   }
 
   if (!ai) {
-    await sendText(senderId, "Maling API Key o hindi nakakabit ang GEMINI_API_KEY.");
+    await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
     return;
   }
 
   try {
     const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text);
-    const sys = isMath ? "Give ONLY the final answer and 1-sentence brief explanation." : "Be concise, direct, and friendly.";
+    const sys = isMath ? "Respond in English. Give ONLY the final answer and a 1-sentence explanation." : "Respond in clear English. Be concise, direct, and helpful.";
     
+    // Inayos ang model papuntang gemini-2.5-flash (In-update para sa free quota limits)
     const aiRes = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `${sys}\n\nUser: ${text}`
     });
-    await sendText(senderId, aiRes.text || "Walang na-generate na sagot.");
+    await sendText(senderId, aiRes.text || "No response generated.");
   } catch (e) {
     console.error('Gemini AI Error:', e);
     if (e.status === 429 || (e.message && e.message.includes('Quota exceeded'))) {
-      await sendText(senderId, "Naubos na ang libreng quota limit ng Gemini API para sa araw na ito. Subukan bukas ulit.");
+      await sendText(senderId, "Daily free quota for Gemini AI exceeded. Please try again tomorrow.");
     } else {
-      await sendText(senderId, "Error sa AI response.");
+      await sendText(senderId, "An error occurred with the AI response.");
     }
   }
 }
@@ -308,7 +319,7 @@ async function sendFileBuffer(id, buffer, filename, contentType) {
     const resJson = await res.json();
     if (!res.ok) {
       console.error('FB Send File Error:', resJson);
-      await sendText(id, "Nagka-error sa pagpapadala ng file sa Messenger.");
+      await sendText(id, "Error sending file to Messenger.");
     }
   } catch (err) {
     console.error('Fetch sendFileBuffer Error:', err);
