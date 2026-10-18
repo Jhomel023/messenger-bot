@@ -257,7 +257,6 @@ async function handleMsg(senderId, text, imgUrl) {
       ? "You are a math tutor. Respond strictly in English. Provide only the final direct answer followed by a one-sentence step explanation." 
       : "You are a helpful assistant. Respond strictly in clear English. Be concise and direct.";
 
-    // Gamitin ang opisyal na gemini-2.5-flash model gamit ang latest @google/genai SDK
     const aiRes = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `${sysPrompt}\n\nUser: ${cleanQuery}`
