@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const bodyParser = require('body-parser');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { PDFDocument } = require('pdf-lib');
 const PDFKit = require('pdfkit');
 const mammoth = require('mammoth');
@@ -15,9 +15,9 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
 const userLastImage = {};
 
-let ai;
+let genAI;
 if (process.env.GEMINI_API_KEY) {
-  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 }
 
 app.get('/webhook', (req, res) => {
@@ -84,7 +84,7 @@ async function processIncomingMessage(senderId, messageObj) {
     return;
   }
 
-  handleMsg(senderId, text, fileUrl);
+  await handleMsg(senderId, text, fileUrl);
 }
 
 async function handleConvertToPdf(senderId, fileUrl, text) {
@@ -236,9 +236,8 @@ async function handleMsg(senderId, text, imgUrl) {
   }
 
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
-    const rawPrompt = text.replace(/\/image|\/draw|\/generate/i, '').trim() || 'Cinematic view';
-    // Dagdagan ng quality keywords para mas maganda ang result ng Pollinations AI
-    const enhancedPrompt = `${rawPrompt}, highly detailed, 8k resolution, photorealistic, masterpiece`;
+    const rawPrompt = text.replace(/\/image|\/draw|\/generate|\/math/i, '').trim() || 'Cinematic artwork';
+    const enhancedPrompt = `${rawPrompt}, highly detailed, 8k resolution, masterpiece, photorealistic`;
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?nologo=true&enhance=true`;
     
     await sendText(senderId, "Generating AI image...");
@@ -246,28 +245,26 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  if (!ai) {
+  if (!genAI) {
     await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
     return;
   }
 
   try {
-    const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text);
-    const sys = isMath ? "Respond in English. Give ONLY the final answer and a 1-sentence explanation." : "Respond in clear English. Be concise, direct, and helpful.";
-    
-    // Inayos ang model papuntang gemini-2.5-flash (In-update para sa free quota limits)
-    const aiRes = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `${sys}\n\nUser: ${text}`
-    });
-    await sendText(senderId, aiRes.text || "No response generated.");
+    const cleanQuery = text.replace(/^\/math\s*/i, '').trim();
+    const isMath = /\d+[\+\-\*\/\^]\d+|\b(solve|math)\b/i.test(text) || low.startsWith('/math');
+    const sysPrompt = isMath 
+      ? "You are a math tutor. Respond strictly in English. Provide only the final direct answer followed by a one-sentence step explanation." 
+      : "You are a helpful assistant. Respond strictly in clear English. Be concise and direct.";
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(`${sysPrompt}\n\nUser: ${cleanQuery}`);
+    const responseText = result.response.text();
+
+    await sendText(senderId, responseText || "No response generated.");
   } catch (e) {
     console.error('Gemini AI Error:', e);
-    if (e.status === 429 || (e.message && e.message.includes('Quota exceeded'))) {
-      await sendText(senderId, "Daily free quota for Gemini AI exceeded. Please try again tomorrow.");
-    } else {
-      await sendText(senderId, "An error occurred with the AI response.");
-    }
+    await sendText(senderId, "Sorry, I am having trouble fetching the AI response right now. Please try again.");
   }
 }
 
