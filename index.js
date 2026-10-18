@@ -257,7 +257,7 @@ async function handleMsg(senderId, text, imgUrl) {
     
     // Inayos ang model papuntang gemini-2.5-flash (In-update para sa free quota limits)
     const aiRes = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       contents: `${sys}\n\nUser: ${text}`
     });
     await sendText(senderId, aiRes.text || "No response generated.");
