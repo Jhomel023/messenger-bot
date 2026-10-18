@@ -84,10 +84,11 @@ async function processIncomingMessage(senderId, messageObj) {
   await handleMsg(senderId, text, fileUrl);
 }
 
-// DIRECT GEMINI REST API CALL (NO SDK REQUIRED)
+// LATEST DIRECT GEMINI API REST CALL
 async function callGemini(promptText, systemInstruction = '') {
   if (!GEMINI_API_KEY) return null;
 
+  // Uses official v1beta Endpoint with gemini-1.5-flash
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
   
   const payload = {
@@ -319,7 +320,7 @@ async function handleMsg(senderId, text, imgUrl) {
   }
 
   if (!GEMINI_API_KEY) {
-    await sendText(senderId, "GEMINI_API_KEY is missing or invalid in Render Environment Variables.");
+    await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
     return;
   }
 
