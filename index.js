@@ -210,7 +210,7 @@ async function handleMsg(senderId, text, imgUrl) {
   const low = text.toLowerCase();
 
   if (['/start', '/help', 'hi', 'hello'].includes(low)) {
-    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
+    await sendText(senderId, "🤖 Pollar Bot Assistant\n\nCommands:\n🎵 /play [Song Title] - Search music\n🎨 /image [Prompt] - Generate AI Image (Gemini Imagen 3)\n✂️ /removebg - Remove image background\n📄 /topdf - Convert image/DOCX/text to PDF\n🧠 [Ask Question] - Ask Gemini AI");
     return;
   }
 
@@ -235,13 +235,42 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
+  // GEMINI IMAGEN 3 API FOR IMAGE GENERATION
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
-    const rawPrompt = text.replace(/\/image|\/draw|\/generate|\/math/i, '').trim() || 'Cinematic artwork';
-    const enhancedPrompt = `${rawPrompt}, highly detailed, 8k resolution, masterpiece, photorealistic`;
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?nologo=true&enhance=true`;
-    
-    await sendText(senderId, "Generating AI image...");
-    await sendMedia(senderId, 'image', imageUrl);
+    const prompt = text.replace(/\/image|\/draw|\/generate/i, '').trim();
+    if (!prompt) {
+      await sendText(senderId, "Please provide a prompt. Example: /image a futuristic cyberpunk city");
+      return;
+    }
+
+    if (!ai) {
+      await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
+      return;
+    }
+
+    await sendText(senderId, "Generating AI image using Gemini Imagen 3...");
+
+    try {
+      const response = await ai.models.generateImages({
+        model: 'imagen-3.0-generate-002',
+        prompt: prompt,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: 'image/jpeg',
+        },
+      });
+
+      if (response.generatedImages && response.generatedImages[0]) {
+        const base64ImageBytes = response.generatedImages[0].image.imageBytes;
+        const imageBuffer = Buffer.from(base64ImageBytes, 'base64');
+        await sendFileBuffer(senderId, imageBuffer, 'gemini-image.jpg', 'image/jpeg');
+      } else {
+        await sendText(senderId, "Failed to generate image with Gemini.");
+      }
+    } catch (err) {
+      console.error('Gemini Imagen Error:', err);
+      await sendText(senderId, "Error generating image with Gemini. Please try again.");
+    }
     return;
   }
 
@@ -258,7 +287,7 @@ async function handleMsg(senderId, text, imgUrl) {
       : "You are a helpful assistant. Respond strictly in clear English. Be concise and direct.";
 
     const aiRes = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       contents: `${sysPrompt}\n\nUser: ${cleanQuery}`
     });
 
