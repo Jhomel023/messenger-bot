@@ -32,8 +32,9 @@ app.post('/webhook', (req, res) => {
         const ev = entry.messaging[0];
         const senderId = ev.sender?.id;
         if (senderId && ev.message && !ev.message.is_echo) {
+          console.log(`[FB WEBHOOK] Incoming message from ${senderId}: "${ev.message.text || 'ATTACHMENT'}"`);
           processIncomingMessage(senderId, ev.message).catch(err => {
-            console.error('Unhandled Webhook Error:', err);
+            console.error('[PROCESS ERROR]:', err);
           });
         }
       }
@@ -93,7 +94,10 @@ async function processIncomingMessage(senderId, messageObj) {
 
 // SAFE GEMINI REST API CALL
 async function callGemini(promptText, systemInstruction = '') {
-  if (!GEMINI_API_KEY) return null;
+  if (!GEMINI_API_KEY) {
+    console.error('[GEMINI ERROR] GEMINI_API_KEY environment variable is missing!');
+    return null;
+  }
 
   const primaryUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
   const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
@@ -118,6 +122,7 @@ async function callGemini(promptText, systemInstruction = '') {
     });
 
     if (!response.ok) {
+      console.warn(`[GEMINI WARN] Primary model 2.5-flash returned ${response.status}. Trying fallback model...`);
       response = await fetch(fallbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -127,14 +132,14 @@ async function callGemini(promptText, systemInstruction = '') {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Gemini REST Error:', response.status, errText);
+      console.error('[GEMINI REST ERROR]:', response.status, errText);
       return null;
     }
 
     const data = await response.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
   } catch (err) {
-    console.error('Gemini Fetch Exception:', err);
+    console.error('[GEMINI EXCEPTION]:', err);
     return null;
   }
 }
@@ -359,25 +364,33 @@ async function handleMsg(senderId, text, imgUrl) {
 
 async function sendText(id, txt) {
   try {
-    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipient: { id }, message: { text: txt } })
     });
+    if (!res.ok) {
+      const fbErr = await res.json().catch(() => ({}));
+      console.error('[FB SEND TEXT ERROR]:', res.status, JSON.stringify(fbErr));
+    }
   } catch (err) {
-    console.error('sendText Error:', err);
+    console.error('[FB FETCH ERROR]:', err);
   }
 }
 
 async function sendMedia(id, type, url) {
   try {
-    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipient: { id }, message: { attachment: { type, payload: { url, is_reusable: true } } } })
     });
+    if (!res.ok) {
+      const fbErr = await res.json().catch(() => ({}));
+      console.error('[FB SEND MEDIA ERROR]:', res.status, JSON.stringify(fbErr));
+    }
   } catch (err) {
-    console.error('sendMedia Error:', err);
+    console.error('[FB MEDIA FETCH ERROR]:', err);
   }
 }
 
@@ -410,13 +423,13 @@ async function sendFileBuffer(id, buffer, filename, contentType) {
       body: fullBody
     });
     
-    const resJson = await res.json();
+    const resJson = await res.json().catch(() => ({}));
     if (!res.ok) {
-      console.error('FB Send File Error:', resJson);
+      console.error('[FB SEND FILE ERROR]:', res.status, JSON.stringify(resJson));
       await sendText(id, "Error sending file to Messenger.");
     }
   } catch (err) {
-    console.error('Fetch sendFileBuffer Error:', err);
+    console.error('[FETCH SEND FILE BUFFER ERROR]:', err);
   }
 }
 
