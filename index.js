@@ -1,7 +1,6 @@
 'use strict';
 const express = require('express');
 const bodyParser = require('body-parser');
-const { GoogleGenAI } = require('@google/genai');
 const { PDFDocument } = require('pdf-lib');
 const PDFKit = require('pdfkit');
 const mammoth = require('mammoth');
@@ -12,13 +11,9 @@ app.use(bodyParser.json());
 const PORT = process.env.PORT || 10000;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const userLastImage = {};
-
-let ai;
-if (process.env.GEMINI_API_KEY) {
-  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-}
 
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
@@ -87,6 +82,45 @@ async function processIncomingMessage(senderId, messageObj) {
   }
 
   await handleMsg(senderId, text, fileUrl);
+}
+
+// DIRECT GEMINI REST API CALL (NO SDK REQUIRED)
+async function callGemini(promptText, systemInstruction = '') {
+  if (!GEMINI_API_KEY) return null;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  
+  const payload = {
+    contents: [{
+      parts: [{ text: promptText }]
+    }]
+  };
+
+  if (systemInstruction) {
+    payload.systemInstruction = {
+      parts: [{ text: systemInstruction }]
+    };
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Gemini REST Error:', response.status, errText);
+      return null;
+    }
+
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+  } catch (err) {
+    console.error('Gemini Fetch Exception:', err);
+    return null;
+  }
 }
 
 async function handleConvertToPdf(senderId, fileUrl, text) {
@@ -242,7 +276,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  // AI IMAGE GENERATION (/image prompt)
+  // AI IMAGE GENERATION
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
     const rawPrompt = text.replace(/\/image|\/draw|\/generate/i, '').trim();
     if (!rawPrompt) {
@@ -254,18 +288,13 @@ async function handleMsg(senderId, text, imgUrl) {
 
     let finalPrompt = rawPrompt;
 
-    if (ai) {
-      try {
-        const geminiPromptResponse = await ai.models.generateContent({
-          model: 'gemini-1.5-flash',
-          contents: `Convert this simple idea into a concise visual prompt for image generation under 25 words: ${rawPrompt}`
-        });
-
-        if (geminiPromptResponse && geminiPromptResponse.text) {
-          finalPrompt = geminiPromptResponse.text.trim();
-        }
-      } catch (err) {
-        console.error('Gemini prompt enhancement bypassed:', err);
+    if (GEMINI_API_KEY) {
+      const enhanced = await callGemini(
+        `Convert this simple idea into a concise visual prompt for image generation under 25 words: ${rawPrompt}`
+      );
+      if (enhanced) {
+        finalPrompt = enhanced.trim();
+      } else {
         finalPrompt = `${rawPrompt}, highly detailed, 8k resolution, photorealistic`;
       }
     } else {
@@ -289,8 +318,8 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  if (!ai) {
-    await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
+  if (!GEMINI_API_KEY) {
+    await sendText(senderId, "GEMINI_API_KEY is missing or invalid in Render Environment Variables.");
     return;
   }
 
@@ -302,12 +331,9 @@ async function handleMsg(senderId, text, imgUrl) {
       ? "You are a math tutor. Respond strictly in English. Provide only the final direct answer followed by a one-sentence step explanation." 
       : "You are a helpful assistant. Respond strictly in clear English. Be concise and direct.";
 
-    const aiRes = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: `${sysPrompt}\n\nUser: ${cleanQuery}`
-    });
+    const responseText = await callGemini(cleanQuery, sysPrompt);
 
-    await sendText(senderId, aiRes.text || "No response generated.");
+    await sendText(senderId, responseText || "No response generated.");
   } catch (e) {
     console.error('Gemini AI Error:', e);
     await sendText(senderId, "Sorry, I am having trouble fetching the AI response right now. Please try again.");
