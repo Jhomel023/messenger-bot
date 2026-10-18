@@ -84,12 +84,12 @@ async function processIncomingMessage(senderId, messageObj) {
   await handleMsg(senderId, text, fileUrl);
 }
 
-// LATEST DIRECT GEMINI API REST CALL
+// FIXED GEMINI REST API CALL (USING GEMINI-2.5-FLASH & FALLBACK)
 async function callGemini(promptText, systemInstruction = '') {
   if (!GEMINI_API_KEY) return null;
 
-  // Uses official v1beta Endpoint with gemini-1.5-flash
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const primaryUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
   
   const payload = {
     contents: [{
@@ -104,11 +104,19 @@ async function callGemini(promptText, systemInstruction = '') {
   }
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(primaryUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+
+    if (!response.ok) {
+      response = await fetch(fallbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
 
     if (!response.ok) {
       const errText = await response.text();
