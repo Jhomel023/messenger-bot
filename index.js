@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const bodyParser = require('body-parser');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
 const { PDFDocument } = require('pdf-lib');
 const PDFKit = require('pdfkit');
 const mammoth = require('mammoth');
@@ -15,9 +15,9 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
 const userLastImage = {};
 
-let genAI;
+let ai;
 if (process.env.GEMINI_API_KEY) {
-  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 }
 
 app.get('/webhook', (req, res) => {
@@ -245,7 +245,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  if (!genAI) {
+  if (!ai) {
     await sendText(senderId, "GEMINI_API_KEY is missing or invalid.");
     return;
   }
@@ -257,11 +257,13 @@ async function handleMsg(senderId, text, imgUrl) {
       ? "You are a math tutor. Respond strictly in English. Provide only the final direct answer followed by a one-sentence step explanation." 
       : "You are a helpful assistant. Respond strictly in clear English. Be concise and direct.";
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(`${sysPrompt}\n\nUser: ${cleanQuery}`);
-    const responseText = result.response.text();
+    // Gamitin ang opisyal na gemini-2.5-flash model gamit ang latest @google/genai SDK
+    const aiRes = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `${sysPrompt}\n\nUser: ${cleanQuery}`
+    });
 
-    await sendText(senderId, responseText || "No response generated.");
+    await sendText(senderId, aiRes.text || "No response generated.");
   } catch (e) {
     console.error('Gemini AI Error:', e);
     await sendText(senderId, "Sorry, I am having trouble fetching the AI response right now. Please try again.");
