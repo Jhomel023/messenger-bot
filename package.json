@@ -6,7 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@google/genai": "^0.1.1",
+    "@google/genai": "latest",
     "body-parser": "^1.20.2",
     "express": "^4.19.2",
     "mammoth": "^1.8.0",
