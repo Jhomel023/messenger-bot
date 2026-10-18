@@ -235,7 +235,7 @@ async function handleMsg(senderId, text, imgUrl) {
     return;
   }
 
-  // GEMINI IMAGEN 3 API FOR IMAGE GENERATION
+  // DIRECT GEMINI IMAGEN 3 API
   if (low.startsWith('/image') || low.startsWith('/draw') || low.startsWith('/generate')) {
     const prompt = text.replace(/\/image|\/draw|\/generate/i, '').trim();
     if (!prompt) {
