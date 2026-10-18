@@ -26,13 +26,15 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', (req, res) => {
   res.status(200).send('EVENT_RECEIVED');
   const body = req.body;
-  if (body.object === 'page') {
+  if (body && body.object === 'page' && body.entry) {
     body.entry.forEach(entry => {
       if (entry.messaging && entry.messaging[0]) {
         const ev = entry.messaging[0];
-        const senderId = ev.sender.id;
-        if (ev.message && !ev.message.is_echo) {
-          processIncomingMessage(senderId, ev.message);
+        const senderId = ev.sender?.id;
+        if (senderId && ev.message && !ev.message.is_echo) {
+          processIncomingMessage(senderId, ev.message).catch(err => {
+            console.error('Unhandled Webhook Error:', err);
+          });
         }
       }
     });
@@ -40,51 +42,56 @@ app.post('/webhook', (req, res) => {
 });
 
 async function processIncomingMessage(senderId, messageObj) {
-  const text = messageObj.text ? messageObj.text.trim() : '';
-  let fileUrl = null;
+  try {
+    const text = messageObj.text ? messageObj.text.trim() : '';
+    let fileUrl = null;
 
-  if (messageObj.attachments && messageObj.attachments[0]) {
-    const att = messageObj.attachments[0];
-    fileUrl = att.payload?.url;
-    if (att.type === 'image' || fileUrl) {
-      userLastImage[senderId] = fileUrl;
+    if (messageObj.attachments && messageObj.attachments[0]) {
+      const att = messageObj.attachments[0];
+      fileUrl = att.payload?.url;
+      if (att.type === 'image' || fileUrl) {
+        userLastImage[senderId] = fileUrl;
+      }
     }
-  }
 
-  if (!fileUrl && messageObj.reply_to && messageObj.reply_to.mid) {
-    try {
-      const graphRes = await fetch(
-        `https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
-      );
-      const data = await graphRes.json();
-      fileUrl = data.attachments?.data?.[0]?.payload?.url || data.attachments?.data?.[0]?.image_data?.url;
-    } catch (err) {
-      console.error('FB Reply Fetch Error:', err);
+    if (!fileUrl && messageObj.reply_to && messageObj.reply_to.mid) {
+      try {
+        const graphRes = await fetch(
+          `https://graph.facebook.com/v21.0/${messageObj.reply_to.mid}?fields=attachments&access_token=${PAGE_ACCESS_TOKEN}`
+        );
+        const data = await graphRes.json();
+        fileUrl = data.attachments?.data?.[0]?.payload?.url || data.attachments?.data?.[0]?.image_data?.url;
+      } catch (err) {
+        console.error('FB Reply Fetch Error:', err);
+      }
     }
+
+    if (!fileUrl && userLastImage[senderId]) {
+      fileUrl = userLastImage[senderId];
+    }
+
+    const low = text.toLowerCase();
+
+    // /pdf COMMAND
+    if (low.startsWith('/pdf') || low.startsWith('/topdf')) {
+      await handleConvertToPdf(senderId, fileUrl, text);
+      return;
+    }
+
+    // /removebg COMMAND
+    if (low.startsWith('/removebg') || low.startsWith('/bgremove')) {
+      await handleRemoveBg(senderId, fileUrl);
+      return;
+    }
+
+    await handleMsg(senderId, text, fileUrl);
+  } catch (globalErr) {
+    console.error('Global Message Handler Error:', globalErr);
+    await sendText(senderId, "An internal error occurred. Please try again.");
   }
-
-  if (!fileUrl && userLastImage[senderId]) {
-    fileUrl = userLastImage[senderId];
-  }
-
-  const low = text.toLowerCase();
-
-  // /pdf COMMAND
-  if (low.startsWith('/pdf') || low.startsWith('/topdf')) {
-    await handleConvertToPdf(senderId, fileUrl, text);
-    return;
-  }
-
-  // /removebg COMMAND
-  if (fileUrl && (low.startsWith('/removebg') || low.startsWith('/bgremove'))) {
-    await handleRemoveBg(senderId, fileUrl);
-    return;
-  }
-
-  await handleMsg(senderId, text, fileUrl);
 }
 
-// FIXED GEMINI REST API CALL (USING GEMINI-2.5-FLASH & FALLBACK)
+// SAFE GEMINI REST API CALL
 async function callGemini(promptText, systemInstruction = '') {
   if (!GEMINI_API_KEY) return null;
 
@@ -209,7 +216,7 @@ function createPdfFromText(text) {
 
 async function handleRemoveBg(senderId, imgUrl) {
   if (!imgUrl) {
-    await sendText(senderId, "Please send an image first before typing /removebg.");
+    await sendText(senderId, "Please send or reply to an image first before typing /removebg.");
     return;
   }
   if (!process.env.REMOVEBG_API_KEY) {
@@ -242,8 +249,8 @@ async function handleRemoveBg(senderId, imgUrl) {
       delete userLastImage[senderId];
       await sendFileBuffer(senderId, Buffer.from(resultBuffer), 'removed-bg.png', 'image/png');
     } else {
-      const errJson = await res.json();
-      await sendText(senderId, `Remove.bg error: ${errJson.errors?.[0]?.title || 'Unknown error'}`);
+      const errJson = await res.json().catch(() => ({}));
+      await sendText(senderId, `Remove.bg error: ${errJson.errors?.[0]?.title || 'Failed to remove background.'}`);
     }
   } catch (e) {
     console.error('Removebg Error:', e);
@@ -280,6 +287,7 @@ async function handleMsg(senderId, text, imgUrl) {
         await sendText(senderId, "No song found.");
       }
     } catch (e) {
+      console.error('Music Search Error:', e);
       await sendText(senderId, "Error searching for song.");
     }
     return;
@@ -350,19 +358,27 @@ async function handleMsg(senderId, text, imgUrl) {
 }
 
 async function sendText(id, txt) {
-  await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id }, message: { text: txt } })
-  });
+  try {
+    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id }, message: { text: txt } })
+    });
+  } catch (err) {
+    console.error('sendText Error:', err);
+  }
 }
 
 async function sendMedia(id, type, url) {
-  await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recipient: { id }, message: { attachment: { type, payload: { url, is_reusable: true } } } })
-  });
+  try {
+    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id }, message: { attachment: { type, payload: { url, is_reusable: true } } } })
+    });
+  } catch (err) {
+    console.error('sendMedia Error:', err);
+  }
 }
 
 async function sendFileBuffer(id, buffer, filename, contentType) {
